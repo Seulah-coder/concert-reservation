@@ -64,12 +64,43 @@ public class ReservationManager {
     }
     
     /**
+     * 예약 확정 (결제 완료) - ID로 조회 후 확정
+     * @param reservationId 확정할 예약 ID
+     * @return 확정된 예약
+     */
+    public Reservation confirmReservation(Long reservationId) {
+        Reservation reservation = getReservationById(reservationId);
+        reservation.confirm();
+        return reservationStoreRepository.save(reservation);
+    }
+    
+    /**
      * 예약 확정 (결제 완료)
      * @param reservation 확정할 예약
      * @return 확정된 예약
      */
     public Reservation confirmReservation(Reservation reservation) {
         reservation.confirm();
+        return reservationStoreRepository.save(reservation);
+    }
+    
+    /**
+     * 예약 취소 - ID와 사용자 검증 후 취소
+     * @param reservationId 취소할 예약 ID
+     * @param userId 취소 요청 사용자 ID
+     * @return 취소된 예약
+     */
+    public Reservation cancelReservation(Long reservationId, String userId) {
+        Reservation reservation = getReservationById(reservationId);
+        if (!reservation.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("본인의 예약만 취소할 수 있습니다");
+        }
+        reservation.cancel();
+        
+        // 좌석 해제
+        Seat seat = seatManager.getSeatByIdWithLock(reservation.getSeatId());
+        seatManager.releaseSeat(seat);
+        
         return reservationStoreRepository.save(reservation);
     }
     
@@ -81,6 +112,31 @@ public class ReservationManager {
     public Reservation cancelReservation(Reservation reservation) {
         reservation.cancel();
         return reservationStoreRepository.save(reservation);
+    }
+    
+    /**
+     * 좌석 예약
+     * @param userId 사용자 ID
+     * @param seatId 좌석 ID
+     * @return 생성된 예약
+     */
+    public Reservation reserveSeat(String userId, Long seatId) {
+        // 좌석 조회 및 예약
+        Seat seat = seatManager.getSeatByIdWithLock(seatId);
+        Seat reservedSeat = seatManager.reserveSeat(seat);  // 이미 reserve() 포함
+        
+        // 예약 생성
+        Reservation reservation = Reservation.create(userId, seatId, reservedSeat.getConcertDateId(), reservedSeat.getPrice());
+        return reservationStoreRepository.save(reservation);
+    }
+    
+    /**
+     * 예약 조회 (Optional)
+     * @param reservationId 예약 ID
+     * @return Optional<Reservation>
+     */
+    public java.util.Optional<Reservation> getReservation(Long reservationId) {
+        return reservationStoreRepository.findById(reservationId);
     }
     
     /**
