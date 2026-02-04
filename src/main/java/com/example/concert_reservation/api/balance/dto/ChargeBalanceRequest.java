@@ -1,9 +1,15 @@
 package com.example.concert_reservation.api.balance.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.math.BigDecimal;
 
+@Schema(description = "잔액 충전 요청")
 public record ChargeBalanceRequest(
+    @Schema(description = "사용자 ID", example = "user123", required = true)
     String userId,
+    
+    @Schema(description = "충전 금액 (KRW)", example = "50000", required = true)
     BigDecimal amount
 ) {
     public ChargeBalanceRequest {
