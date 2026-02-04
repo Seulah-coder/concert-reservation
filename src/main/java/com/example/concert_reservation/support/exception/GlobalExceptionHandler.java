@@ -64,6 +64,45 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 도메인 리소스 없음
+     */
+    @ExceptionHandler(DomainNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleDomainNotFoundException(DomainNotFoundException ex) {
+        ErrorResponse error = new ErrorResponse(
+            HttpStatus.NOT_FOUND.value(),
+            ex.getMessage(),
+            LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    }
+
+    /**
+     * 도메인 상태 충돌
+     */
+    @ExceptionHandler(DomainConflictException.class)
+    public ResponseEntity<ErrorResponse> handleDomainConflictException(DomainConflictException ex) {
+        ErrorResponse error = new ErrorResponse(
+            HttpStatus.CONFLICT.value(),
+            ex.getMessage(),
+            LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    /**
+     * 도메인 접근 금지
+     */
+    @ExceptionHandler(DomainForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleDomainForbiddenException(DomainForbiddenException ex) {
+        ErrorResponse error = new ErrorResponse(
+            HttpStatus.FORBIDDEN.value(),
+            ex.getMessage(),
+            LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
+    /**
      * 리소스 없음 (도메인 조회 실패)
      */
     @ExceptionHandler(NoSuchElementException.class)

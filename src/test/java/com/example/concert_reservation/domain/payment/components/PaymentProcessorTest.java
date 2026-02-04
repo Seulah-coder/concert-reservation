@@ -6,6 +6,9 @@ import com.example.concert_reservation.domain.payment.repositories.PaymentReposi
 import com.example.concert_reservation.domain.reservation.components.ReservationManager;
 import com.example.concert_reservation.domain.reservation.models.Reservation;
 import com.example.concert_reservation.domain.reservation.models.ReservationStatus;
+import com.example.concert_reservation.support.exception.DomainConflictException;
+import com.example.concert_reservation.support.exception.DomainForbiddenException;
+import com.example.concert_reservation.support.exception.DomainNotFoundException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -78,7 +81,7 @@ class PaymentProcessorTest {
         
         // when & then
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservationId, paymentAttemptUser))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainForbiddenException.class)
             .hasMessageContaining("본인의 예약만 결제할 수 있습니다");
         
         verify(balanceManager, never()).useBalance(anyString(), any());
@@ -106,7 +109,7 @@ class PaymentProcessorTest {
         
         // when & then
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservationId, userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("예약 상태가 올바르지 않습니다");
         
         verify(balanceManager, never()).useBalance(anyString(), any());
@@ -130,7 +133,7 @@ class PaymentProcessorTest {
         
         // when & then
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservationId, userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("예약 상태가 올바르지 않습니다");
     }
     
@@ -151,7 +154,7 @@ class PaymentProcessorTest {
         
         // when & then
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservationId, userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("예약 상태가 올바르지 않습니다");
     }
     
@@ -166,7 +169,7 @@ class PaymentProcessorTest {
         
         // when & then
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservationId, userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainNotFoundException.class)
             .hasMessageContaining("예약을 찾을 수 없습니다");
     }
     
@@ -186,7 +189,7 @@ class PaymentProcessorTest {
         
         // when & then
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservationId, userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("이미 결제된 예약입니다");
         
         verify(balanceManager, never()).useBalance(anyString(), any());
@@ -209,7 +212,7 @@ class PaymentProcessorTest {
         
         // when & then
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservationId, userId))
-            .isInstanceOf(IllegalStateException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("잔액이 부족합니다");
         
         verify(reservationManager, never()).confirmReservation(anyLong());

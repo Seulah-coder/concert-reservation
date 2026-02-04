@@ -4,6 +4,9 @@ import com.example.concert_reservation.api.payment.dto.PaymentResponse;
 import com.example.concert_reservation.domain.payment.components.PaymentProcessor;
 import com.example.concert_reservation.domain.payment.models.Payment;
 import com.example.concert_reservation.domain.payment.models.PaymentStatus;
+import com.example.concert_reservation.support.exception.DomainConflictException;
+import com.example.concert_reservation.support.exception.DomainForbiddenException;
+import com.example.concert_reservation.support.exception.DomainNotFoundException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -66,11 +69,11 @@ class ProcessPaymentUseCaseTest {
         String userId = "user123";
         
         given(paymentProcessor.processPayment(reservationId, userId))
-            .willThrow(new IllegalArgumentException("예약을 찾을 수 없습니다"));
+            .willThrow(new DomainNotFoundException("예약을 찾을 수 없습니다"));
         
         // when & then
         assertThatThrownBy(() -> processPaymentUseCase.execute(reservationId, userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainNotFoundException.class)
             .hasMessageContaining("예약을 찾을 수 없습니다");
     }
     
@@ -82,11 +85,11 @@ class ProcessPaymentUseCaseTest {
         String userId = "hacker";
         
         given(paymentProcessor.processPayment(reservationId, userId))
-            .willThrow(new IllegalArgumentException("본인의 예약만 결제할 수 있습니다"));
+            .willThrow(new DomainForbiddenException("본인의 예약만 결제할 수 있습니다"));
         
         // when & then
         assertThatThrownBy(() -> processPaymentUseCase.execute(reservationId, userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainForbiddenException.class)
             .hasMessageContaining("본인의 예약만 결제할 수 있습니다");
     }
     
@@ -98,11 +101,11 @@ class ProcessPaymentUseCaseTest {
         String userId = "user123";
         
         given(paymentProcessor.processPayment(reservationId, userId))
-            .willThrow(new IllegalStateException("잔액이 부족합니다"));
+            .willThrow(new DomainConflictException("잔액이 부족합니다"));
         
         // when & then
         assertThatThrownBy(() -> processPaymentUseCase.execute(reservationId, userId))
-            .isInstanceOf(IllegalStateException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("잔액이 부족합니다");
     }
 }
