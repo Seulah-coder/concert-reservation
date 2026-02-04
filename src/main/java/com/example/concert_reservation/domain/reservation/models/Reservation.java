@@ -110,12 +110,13 @@ public class Reservation {
     
     /**
      * 예약 취소
-     * PENDING → CANCELLED
+     * PENDING → CANCELLED (일반 취소)
+     * CONFIRMED → CANCELLED (환불로 인한 취소)
      */
     public void cancel() {
-        if (this.status != ReservationStatus.PENDING) {
+        if (this.status != ReservationStatus.PENDING && this.status != ReservationStatus.CONFIRMED) {
             throw new IllegalStateException(
-                "임시 예약 상태만 취소할 수 있습니다. 현재 상태: " + this.status
+                "임시 예약 또는 확정된 예약만 취소할 수 있습니다. 현재 상태: " + this.status
             );
         }
         this.status = ReservationStatus.CANCELLED;

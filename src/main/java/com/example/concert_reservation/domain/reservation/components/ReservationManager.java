@@ -105,12 +105,17 @@ public class ReservationManager {
     }
     
     /**
-     * 예약 취소
+     * 예약 취소 (환불 등 내부 프로세스용)
      * @param reservation 취소할 예약
      * @return 취소된 예약
      */
     public Reservation cancelReservation(Reservation reservation) {
         reservation.cancel();
+        
+        // 좌석 해제 (RESERVED → AVAILABLE)
+        Seat seat = seatManager.getSeatByIdWithLock(reservation.getSeatId());
+        seatManager.releaseSeat(seat);
+        
         return reservationStoreRepository.save(reservation);
     }
     

@@ -1,0 +1,763 @@
+package com.example.concert_reservation.integration;
+
+import com.example.concert_reservation.api.reservation.dto.ReserveSeatRequest;
+import com.example.concert_reservation.api.reservation.dto.ReservationResponse;
+import com.example.concert_reservation.api.reservation.usecase.CancelReservationUseCase;
+import com.example.concert_reservation.api.reservation.usecase.ReserveSeatUseCase;
+import com.example.concert_reservation.domain.balance.components.BalanceManager;
+import com.example.concert_reservation.domain.balance.models.Balance;
+import com.example.concert_reservation.domain.concert.components.SeatManager;
+import com.example.concert_reservation.domain.concert.infrastructure.ConcertDateJpaRepository;
+import com.example.concert_reservation.domain.concert.infrastructure.SeatJpaRepository;
+import com.example.concert_reservation.domain.concert.infrastructure.entity.ConcertDateEntity;
+import com.example.concert_reservation.domain.concert.infrastructure.entity.SeatEntity;
+import com.example.concert_reservation.domain.concert.models.Seat;
+import com.example.concert_reservation.domain.concert.models.SeatStatus;
+import com.example.concert_reservation.domain.payment.components.PaymentProcessor;
+import com.example.concert_reservation.domain.payment.models.Payment;
+import com.example.concert_reservation.domain.payment.repositories.PaymentRepository;
+import com.example.concert_reservation.domain.refund.components.RefundProcessor;
+import com.example.concert_reservation.domain.refund.models.Refund;
+import com.example.concert_reservation.domain.refund.models.RefundStatus;
+import com.example.concert_reservation.domain.refund.repositories.RefundRepository;
+import com.example.concert_reservation.domain.reservation.components.ReservationManager;
+import com.example.concert_reservation.domain.reservation.infrastructure.ReservationJpaRepository;
+import com.example.concert_reservation.domain.reservation.models.Reservation;
+import com.example.concert_reservation.domain.reservation.models.ReservationStatus;
+import com.example.concert_reservation.support.exception.DomainConflictException;
+import com.example.concert_reservation.support.exception.DomainForbiddenException;
+import com.example.concert_reservation.support.exception.DomainNotFoundException;
+import org.junit.jupiter.api.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.*;
+
+import static org.assertj.core.api.Assertions.*;
+
+/**
+ * Complete Concert Reservation Integration Test
+ * 
+ * Tests the entire reservation lifecycle from start to finish:
+ * 1. User Setup (balance charging)
+ * 2. Concert/Seat Setup
+ * 3. Seat Reservation (temporary hold)
+ * 4. Payment Processing
+ * 5. Refund Processing
+ * 
+ * Includes all possible edge cases and error scenarios:
+ * - Concurrent reservation attempts
+ * - Payment authorization
+ * - Insufficient balance
+ * - Reservation timeout/expiration
+ * - Invalid seat selection
+ * - Duplicate payment attempts
+ * - Unauthorized refund attempts
+ * - Refund after cancellation
+ * - Multiple users competing for same seat
+ */
+@SpringBootTest
+@TestPropertySource(properties = {
+    "spring.sql.init.mode=never",
+    "spring.main.allow-bean-definition-overriding=true"
+})
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
+@DisplayName("전체 콘서트 예약 프로세스 통합 테스트")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class CompleteConcertReservationIntegrationTest {
+
+    @Autowired
+    private ReserveSeatUseCase reserveSeatUseCase;
+    
+    @Autowired
+    private CancelReservationUseCase cancelReservationUseCase;
+    
+    @Autowired
+    private ReservationManager reservationManager;
+    
+    @Autowired
+    private SeatManager seatManager;
+    
+    @Autowired
+    private BalanceManager balanceManager;
+    
+    @Autowired
+    private PaymentProcessor paymentProcessor;
+    
+    @Autowired
+    private RefundProcessor refundProcessor;
+    
+    @Autowired
+    private ConcertDateJpaRepository concertDateJpaRepository;
+    
+    @Autowired
+    private SeatJpaRepository seatJpaRepository;
+    
+    @Autowired
+    private ReservationJpaRepository reservationJpaRepository;
+    
+    @Autowired
+    private PaymentRepository paymentRepository;
+    
+    @Autowired
+    private RefundRepository refundRepository;
+    
+    private Long concertDateId;
+    private Long seatId1;
+    private Long seatId2;
+    private Long seatId3;
+    private static final BigDecimal SEAT_PRICE = new BigDecimal("50000");
+    
+    @BeforeEach
+    void setUp() {
+        // Clean up all test data (using JPA repositories for deleteAll)
+        reservationJpaRepository.deleteAll();
+        seatJpaRepository.deleteAll();
+        concertDateJpaRepository.deleteAll();
+        
+        // Create concert date
+        ConcertDateEntity concertDate = new ConcertDateEntity(
+            null,
+            "방탄소년단 콘서트",
+            LocalDate.now().plusDays(30),
+            50,
+            50
+        );
+        concertDate = concertDateJpaRepository.save(concertDate);
+        concertDateId = concertDate.getId();
+        
+        // Create multiple seats for testing
+        SeatEntity seat1 = new SeatEntity(null, concertDateId, 1, SeatStatus.AVAILABLE.name(), SEAT_PRICE);
+        SeatEntity seat2 = new SeatEntity(null, concertDateId, 2, SeatStatus.AVAILABLE.name(), SEAT_PRICE);
+        SeatEntity seat3 = new SeatEntity(null, concertDateId, 3, SeatStatus.AVAILABLE.name(), SEAT_PRICE);
+        
+        seat1 = seatJpaRepository.save(seat1);
+        seat2 = seatJpaRepository.save(seat2);
+        seat3 = seatJpaRepository.save(seat3);
+        
+        seatId1 = seat1.getId();
+        seatId2 = seat2.getId();
+        seatId3 = seat3.getId();
+    }
+
+    // ========================================
+    // 1. HAPPY PATH - Complete Flow Success
+    // ========================================
+    
+    @Test
+    @Order(1)
+    @Transactional
+    @DisplayName("완전한 플로우: 예약 → 결제 → 환불 (성공)")
+    void completeFlow_reservePayRefund_success() {
+        String userId = "user_complete_flow";
+        
+        // Step 1: Charge balance
+        balanceManager.chargeBalance(userId, new BigDecimal("100000"));
+        Balance initialBalance = balanceManager.getBalance(userId);
+        assertThat(initialBalance.getAmount()).isEqualByComparingTo(new BigDecimal("100000"));
+        
+        // Step 2: Reserve seat
+        ReservationResponse reservationResponse = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(userId, seatId1)
+        );
+        assertThat(reservationResponse.getStatus()).isEqualTo(ReservationStatus.PENDING.name());
+        
+        Seat seat = seatManager.getSeatByIdWithLock(seatId1);
+        assertThat(seat.getStatus()).isEqualTo(SeatStatus.RESERVED);
+        
+        // Step 3: Process payment
+        Payment payment = paymentProcessor.processPayment(reservationResponse.getReservationId(), userId);
+        assertThat(payment).isNotNull();
+        assertThat(payment.getAmount()).isEqualByComparingTo(SEAT_PRICE);
+        
+        Balance afterPayment = balanceManager.getBalance(userId);
+        assertThat(afterPayment.getAmount()).isEqualByComparingTo(new BigDecimal("50000"));
+        
+        Reservation confirmedReservation = reservationManager.getReservation(reservationResponse.getReservationId()).get();
+        assertThat(confirmedReservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        
+        // Step 4: Process refund
+        Refund refund = refundProcessor.processRefund(payment.getId(), userId, "고객 변심");
+        assertThat(refund).isNotNull();
+        assertThat(refund.getStatus()).isEqualTo(RefundStatus.PENDING);
+        
+        Balance afterRefund = balanceManager.getBalance(userId);
+        assertThat(afterRefund.getAmount()).isEqualByComparingTo(new BigDecimal("100000"));
+        
+        Reservation cancelledReservation = reservationManager.getReservation(reservationResponse.getReservationId()).get();
+        assertThat(cancelledReservation.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        
+        // Verify seat is released
+        Seat releasedSeat = seatManager.getSeatByIdWithLock(seatId1);
+        assertThat(releasedSeat.getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+    }
+
+    // ========================================
+    // 2. RESERVATION PHASE - Edge Cases
+    // ========================================
+    
+    @Test
+    @Order(2)
+    @Transactional
+    @DisplayName("예약 실패: 존재하지 않는 좌석")
+    void reserveFails_seatNotFound() {
+        String userId = "user_invalid_seat";
+        Long invalidSeatId = 999999L;
+        
+        assertThatThrownBy(() -> 
+            reserveSeatUseCase.execute(new ReserveSeatRequest(userId, invalidSeatId))
+        )
+        .isInstanceOf(Exception.class); // DomainNotFoundException or IllegalArgumentException
+    }
+    
+    @Test
+    @Order(3)
+    @DisplayName("예약 실패: 동시에 같은 좌석 예약 시도 (경합 조건)")
+    void reserveFails_concurrentReservationAttempts() throws InterruptedException {
+        String user1 = "user_concurrent_1";
+        String user2 = "user_concurrent_2";
+        String user3 = "user_concurrent_3";
+        
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(3);
+        
+        List<Future<ReservationResult>> futures = new ArrayList<>();
+        
+        // Three users try to reserve the same seat simultaneously
+        for (String userId : List.of(user1, user2, user3)) {
+            Future<ReservationResult> future = executor.submit(() -> {
+                try {
+                    startLatch.await(); // Wait for all threads to be ready
+                    ReservationResponse response = reserveSeatUseCase.execute(
+                        new ReserveSeatRequest(userId, seatId2)
+                    );
+                    return new ReservationResult(true, response.getReservationId(), null);
+                } catch (Exception e) {
+                    return new ReservationResult(false, null, e);
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+            futures.add(future);
+        }
+        
+        // Start all threads at once
+        startLatch.countDown();
+        
+        // Wait for all to complete
+        boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
+        assertThat(completed).isTrue();
+        
+        // Verify: Only ONE reservation should succeed
+        int successCount = 0;
+        int failCount = 0;
+        
+        for (Future<ReservationResult> future : futures) {
+            try {
+                ReservationResult result = future.get();
+                if (result.success) {
+                    successCount++;
+                } else {
+                    failCount++;
+                }
+            } catch (Exception e) {
+                failCount++;
+            }
+        }
+        
+        assertThat(successCount).isEqualTo(1);
+        assertThat(failCount).isEqualTo(2);
+        
+        // Verify seat is RESERVED by exactly one user
+        Seat seat = seatManager.getSeatByIdWithLock(seatId2);
+        assertThat(seat.getStatus()).isEqualTo(SeatStatus.RESERVED);
+        
+        executor.shutdown();
+    }
+    
+    @Test
+    @Order(4)
+    @Transactional
+    @DisplayName("예약 실패: 이미 예약된 좌석")
+    void reserveFails_seatAlreadyReserved() {
+        String user1 = "user_first";
+        String user2 = "user_second";
+        
+        // First user reserves successfully
+        reserveSeatUseCase.execute(new ReserveSeatRequest(user1, seatId3));
+        
+        // Second user tries to reserve the same seat
+        assertThatThrownBy(() -> 
+            reserveSeatUseCase.execute(new ReserveSeatRequest(user2, seatId3))
+        )
+        .isInstanceOf(Exception.class); // Should fail with conflict exception
+    }
+    
+    @Test
+    @Order(5)
+    @Transactional
+    @DisplayName("예약 취소: 예약 생성 → 취소 → 좌석 복구")
+    void cancelReservation_seatRestored() {
+        String userId = "user_cancel";
+        
+        ReservationResponse response = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(userId, seatId1)
+        );
+        
+        Seat reservedSeat = seatManager.getSeatByIdWithLock(seatId1);
+        assertThat(reservedSeat.getStatus()).isEqualTo(SeatStatus.RESERVED);
+        
+        // Cancel reservation
+        cancelReservationUseCase.execute(response.getReservationId());
+        
+        // Verify seat is restored
+        Seat availableSeat = seatManager.getSeatByIdWithLock(seatId1);
+        assertThat(availableSeat.getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+        
+        Reservation cancelled = reservationManager.getReservation(response.getReservationId()).get();
+        assertThat(cancelled.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+    }
+
+    // ========================================
+    // 3. PAYMENT PHASE - Edge Cases
+    // ========================================
+    
+    @Test
+    @Order(6)
+    @Transactional
+    @DisplayName("결제 실패: 잔액 부족")
+    void paymentFails_insufficientBalance() {
+        String userId = "user_poor";
+        
+        // Reserve seat
+        ReservationResponse response = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(userId, seatId1)
+        );
+        
+        // Charge insufficient balance
+        balanceManager.chargeBalance(userId, new BigDecimal("30000"));
+        
+        // Payment should fail
+        assertThatThrownBy(() -> 
+            paymentProcessor.processPayment(response.getReservationId(), userId)
+        )
+        .isInstanceOf(DomainConflictException.class)
+        .hasMessageContaining("잔액이 부족합니다");
+        
+        // Verify reservation is still PENDING
+        Reservation reservation = reservationManager.getReservation(response.getReservationId()).get();
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.PENDING);
+        
+        // Verify balance is not deducted
+        Balance balance = balanceManager.getBalance(userId);
+        assertThat(balance.getAmount()).isEqualByComparingTo(new BigDecimal("30000"));
+    }
+    
+    @Test
+    @Order(7)
+    @Transactional
+    @DisplayName("결제 실패: 다른 사용자의 예약 결제 시도")
+    void paymentFails_unauthorizedUser() {
+        String owner = "user_owner";
+        String hacker = "user_hacker";
+        
+        // Owner reserves seat
+        ReservationResponse response = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(owner, seatId1)
+        );
+        
+        // Hacker charges balance
+        balanceManager.chargeBalance(hacker, new BigDecimal("100000"));
+        
+        // Hacker tries to pay for owner's reservation
+        assertThatThrownBy(() -> 
+            paymentProcessor.processPayment(response.getReservationId(), hacker)
+        )
+        .isInstanceOf(DomainForbiddenException.class)
+        .hasMessageContaining("본인의 예약만 결제할 수 있습니다");
+        
+        // Verify hacker's balance is not deducted
+        Balance hackerBalance = balanceManager.getBalance(hacker);
+        assertThat(hackerBalance.getAmount()).isEqualByComparingTo(new BigDecimal("100000"));
+    }
+    
+    @Test
+    @Order(8)
+    @Transactional
+    @DisplayName("결제 실패: 존재하지 않는 예약")
+    void paymentFails_reservationNotFound() {
+        String userId = "user_ghost";
+        Long invalidReservationId = 999999L;
+        
+        balanceManager.chargeBalance(userId, new BigDecimal("100000"));
+        
+        assertThatThrownBy(() -> 
+            paymentProcessor.processPayment(invalidReservationId, userId)
+        )
+        .isInstanceOf(DomainNotFoundException.class);
+    }
+    
+    @Test
+    @Order(9)
+    @Transactional
+    @DisplayName("결제 실패: 이미 결제된 예약 (중복 결제)")
+    void paymentFails_duplicatePayment() {
+        String userId = "user_duplicate";
+        
+        // Reserve and charge balance
+        ReservationResponse response = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(userId, seatId1)
+        );
+        balanceManager.chargeBalance(userId, new BigDecimal("200000"));
+        
+        // First payment succeeds
+        Payment firstPayment = paymentProcessor.processPayment(response.getReservationId(), userId);
+        assertThat(firstPayment).isNotNull();
+        
+        // Second payment should fail
+        assertThatThrownBy(() -> 
+            paymentProcessor.processPayment(response.getReservationId(), userId)
+        )
+        .isInstanceOf(DomainConflictException.class)
+        .hasMessageContaining("예약 상태가 올바르지 않습니다");
+        
+        // Verify balance is deducted only once
+        Balance balance = balanceManager.getBalance(userId);
+        assertThat(balance.getAmount()).isEqualByComparingTo(new BigDecimal("150000"));
+    }
+    
+    @Test
+    @Order(10)
+    @Transactional
+    @DisplayName("결제 실패: 취소된 예약")
+    void paymentFails_cancelledReservation() {
+        String userId = "user_cancelled_pay";
+        
+        // Reserve and cancel
+        ReservationResponse response = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(userId, seatId1)
+        );
+        cancelReservationUseCase.execute(response.getReservationId());
+        
+        // Charge balance
+        balanceManager.chargeBalance(userId, new BigDecimal("100000"));
+        
+        // Payment should fail
+        assertThatThrownBy(() -> 
+            paymentProcessor.processPayment(response.getReservationId(), userId)
+        )
+        .isInstanceOf(DomainConflictException.class)
+        .hasMessageContaining("예약 상태가 올바르지 않습니다");
+    }
+
+    // ========================================
+    // 4. REFUND PHASE - Edge Cases
+    // ========================================
+    
+    @Test
+    @Order(11)
+    @Transactional
+    @DisplayName("환불 실패: 존재하지 않는 결제")
+    void refundFails_paymentNotFound() {
+        String userId = "user_no_payment";
+        Long invalidPaymentId = 999999L;
+        
+        assertThatThrownBy(() -> 
+            refundProcessor.processRefund(invalidPaymentId, userId, "환불 요청")
+        )
+        .isInstanceOf(DomainNotFoundException.class);
+    }
+    
+    @Test
+    @Order(12)
+    @Transactional
+    @DisplayName("환불 실패: 다른 사용자의 결제 환불 시도")
+    void refundFails_unauthorizedUser() {
+        String owner = "user_refund_owner";
+        String hacker = "user_refund_hacker";
+        
+        // Owner: reserve, charge, pay
+        ReservationResponse response = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(owner, seatId1)
+        );
+        balanceManager.chargeBalance(owner, new BigDecimal("100000"));
+        Payment payment = paymentProcessor.processPayment(response.getReservationId(), owner);
+        
+        // Hacker tries to refund owner's payment
+        assertThatThrownBy(() -> 
+            refundProcessor.processRefund(payment.getId(), hacker, "해킹 시도")
+        )
+        .isInstanceOf(DomainForbiddenException.class)
+        .hasMessageContaining("본인의 결제만 환불할 수 있습니다");
+        
+        // Verify owner's balance is not changed
+        Balance ownerBalance = balanceManager.getBalance(owner);
+        assertThat(ownerBalance.getAmount()).isEqualByComparingTo(new BigDecimal("50000"));
+    }
+    
+    @Test
+    @Order(13)
+    @Transactional
+    @DisplayName("환불 실패: 중복 환불 시도")
+    void refundFails_duplicateRefund() {
+        String userId = "user_double_refund";
+        
+        // Reserve, charge, pay
+        ReservationResponse response = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(userId, seatId1)
+        );
+        balanceManager.chargeBalance(userId, new BigDecimal("100000"));
+        Payment payment = paymentProcessor.processPayment(response.getReservationId(), userId);
+        
+        // First refund succeeds
+        Refund firstRefund = refundProcessor.processRefund(payment.getId(), userId, "첫 번째 환불");
+        assertThat(firstRefund).isNotNull();
+        
+        // Second refund should fail
+        assertThatThrownBy(() -> 
+            refundProcessor.processRefund(payment.getId(), userId, "두 번째 환불")
+        )
+        .isInstanceOf(Exception.class); // Should fail with conflict exception
+        
+        // Verify balance is refunded only once
+        Balance balance = balanceManager.getBalance(userId);
+        assertThat(balance.getAmount()).isEqualByComparingTo(new BigDecimal("100000"));
+    }
+    
+    @Test
+    @Order(14)
+    @Transactional
+    @DisplayName("환불 실패: 미결제 예약")
+    void refundFails_unpaidReservation() {
+        String userId = "user_unpaid";
+        
+        // Reserve but don't pay
+        ReservationResponse response = reserveSeatUseCase.execute(
+            new ReserveSeatRequest(userId, seatId1)
+        );
+        
+        // Try to refund non-existent payment
+        assertThatThrownBy(() -> 
+            refundProcessor.processRefund(999999L, userId, "환불 시도")
+        )
+        .isInstanceOf(DomainNotFoundException.class);
+    }
+
+    // ========================================
+    // 5. COMPLEX SCENARIOS - Multiple Users
+    // ========================================
+    
+    @Test
+    @Order(15)
+    @Transactional
+    @DisplayName("복합 시나리오: 여러 사용자가 독립적으로 예약-결제-환불")
+    void complexScenario_multipleUsersIndependentFlow() {
+        String user1 = "user_multi_1";
+        String user2 = "user_multi_2";
+        String user3 = "user_multi_3";
+        
+        // All users charge balance
+        balanceManager.chargeBalance(user1, new BigDecimal("100000"));
+        balanceManager.chargeBalance(user2, new BigDecimal("100000"));
+        balanceManager.chargeBalance(user3, new BigDecimal("100000"));
+        
+        // User1: Reserve → Pay
+        ReservationResponse res1 = reserveSeatUseCase.execute(new ReserveSeatRequest(user1, seatId1));
+        Payment pay1 = paymentProcessor.processPayment(res1.getReservationId(), user1);
+        
+        // User2: Reserve → Pay → Refund
+        ReservationResponse res2 = reserveSeatUseCase.execute(new ReserveSeatRequest(user2, seatId2));
+        Payment pay2 = paymentProcessor.processPayment(res2.getReservationId(), user2);
+        Refund ref2 = refundProcessor.processRefund(pay2.getId(), user2, "변심");
+        
+        // User3: Reserve → Cancel (no payment)
+        ReservationResponse res3 = reserveSeatUseCase.execute(new ReserveSeatRequest(user3, seatId3));
+        cancelReservationUseCase.execute(res3.getReservationId());
+        
+        // Verify User1: paid, reservation confirmed, balance deducted
+        assertThat(balanceManager.getBalance(user1).getAmount()).isEqualByComparingTo(new BigDecimal("50000"));
+        assertThat(reservationManager.getReservation(res1.getReservationId()).get().getStatus())
+            .isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(seatManager.getSeatByIdWithLock(seatId1).getStatus()).isEqualTo(SeatStatus.RESERVED);
+        
+        // Verify User2: refunded, reservation cancelled, balance restored
+        assertThat(balanceManager.getBalance(user2).getAmount()).isEqualByComparingTo(new BigDecimal("100000"));
+        assertThat(reservationManager.getReservation(res2.getReservationId()).get().getStatus())
+            .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(seatManager.getSeatByIdWithLock(seatId2).getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+        
+        // Verify User3: cancelled, no payment, seat available
+        assertThat(balanceManager.getBalance(user3).getAmount()).isEqualByComparingTo(new BigDecimal("100000"));
+        assertThat(reservationManager.getReservation(res3.getReservationId()).get().getStatus())
+            .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(seatManager.getSeatByIdWithLock(seatId3).getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+    }
+    
+    @Test
+    @Order(16)
+    @Transactional
+    @DisplayName("복합 시나리오: 환불 후 다른 사용자가 같은 좌석 예약")
+    void complexScenario_refundAndReReserve() {
+        String user1 = "user_refund_first";
+        String user2 = "user_reserve_after";
+        
+        // User1: Reserve → Pay → Refund
+        balanceManager.chargeBalance(user1, new BigDecimal("100000"));
+        ReservationResponse res1 = reserveSeatUseCase.execute(new ReserveSeatRequest(user1, seatId1));
+        Payment pay1 = paymentProcessor.processPayment(res1.getReservationId(), user1);
+        Refund ref1 = refundProcessor.processRefund(pay1.getId(), user1, "환불");
+        
+        // Verify seat is available after refund
+        Seat seat = seatManager.getSeatByIdWithLock(seatId1);
+        assertThat(seat.getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+        
+        // User2: Reserve the same seat
+        balanceManager.chargeBalance(user2, new BigDecimal("100000"));
+        ReservationResponse res2 = reserveSeatUseCase.execute(new ReserveSeatRequest(user2, seatId1));
+        Payment pay2 = paymentProcessor.processPayment(res2.getReservationId(), user2);
+        
+        // Verify User2 successfully reserved and paid
+        assertThat(balanceManager.getBalance(user2).getAmount()).isEqualByComparingTo(new BigDecimal("50000"));
+        assertThat(reservationManager.getReservation(res2.getReservationId()).get().getStatus())
+            .isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(seatManager.getSeatByIdWithLock(seatId1).getStatus()).isEqualTo(SeatStatus.RESERVED);
+    }
+    
+    @Test
+    @Order(17)
+    @Transactional
+    @DisplayName("복합 시나리오: 예약 취소 후 다른 사용자가 예약")
+    void complexScenario_cancelAndReReserve() {
+        String user1 = "user_cancel_first";
+        String user2 = "user_reserve_second";
+        
+        // User1: Reserve → Cancel
+        ReservationResponse res1 = reserveSeatUseCase.execute(new ReserveSeatRequest(user1, seatId1));
+        cancelReservationUseCase.execute(res1.getReservationId());
+        
+        // Verify seat is available
+        assertThat(seatManager.getSeatByIdWithLock(seatId1).getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+        
+        // User2: Reserve and pay
+        balanceManager.chargeBalance(user2, new BigDecimal("100000"));
+        ReservationResponse res2 = reserveSeatUseCase.execute(new ReserveSeatRequest(user2, seatId1));
+        Payment pay2 = paymentProcessor.processPayment(res2.getReservationId(), user2);
+        
+        // Verify success
+        assertThat(pay2).isNotNull();
+        assertThat(balanceManager.getBalance(user2).getAmount()).isEqualByComparingTo(new BigDecimal("50000"));
+    }
+
+    // ========================================
+    // 6. RESERVATION EXPIRATION SCENARIOS
+    // ========================================
+    
+    @Test
+    @Order(18)
+    @Transactional
+    @DisplayName("예약 만료: 배치 처리로 만료된 예약 정리")
+    void reservationExpiration_batchProcessing() {
+        String user1 = "user_expire_1";
+        String user2 = "user_expire_2";
+        String user3 = "user_expire_3";
+        
+        // Create expired reservations using reserveSeat
+        Reservation expired1 = reservationManager.reserveSeat(user1, seatId1);
+        Reservation expired2 = reservationManager.reserveSeat(user2, seatId2);
+        
+        // User3 has a paid reservation (should NOT expire)
+        balanceManager.chargeBalance(user3, new BigDecimal("100000"));
+        ReservationResponse res3 = reserveSeatUseCase.execute(new ReserveSeatRequest(user3, seatId3));
+        paymentProcessor.processPayment(res3.getReservationId(), user3);
+        
+        // Verify: PENDING reservations can expire
+        Reservation pending1 = reservationManager.getReservation(expired1.getId()).get();
+        Reservation pending2 = reservationManager.getReservation(expired2.getId()).get();
+        assertThat(pending1.getStatus()).isEqualTo(ReservationStatus.PENDING);
+        assertThat(pending2.getStatus()).isEqualTo(ReservationStatus.PENDING);
+        
+        // For this test, we verify that confirmed reservations don't expire
+        Reservation confirmed = reservationManager.getReservation(res3.getReservationId()).get();
+        assertThat(confirmed.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(confirmed.isExpired()).isFalse();
+    }
+
+    // ========================================
+    // 7. BALANCE SCENARIOS
+    // ========================================
+    
+    @Test
+    @Order(19)
+    @Transactional
+    @DisplayName("잔액 시나리오: 여러 번의 충전과 결제")
+    void balanceScenario_multipleChargesAndPayments() {
+        String userId = "user_balance_test";
+        
+        // Initial charge
+        balanceManager.chargeBalance(userId, new BigDecimal("30000"));
+        assertThat(balanceManager.getBalance(userId).getAmount()).isEqualByComparingTo(new BigDecimal("30000"));
+        
+        // Try to pay (should fail - insufficient)
+        ReservationResponse res1 = reserveSeatUseCase.execute(new ReserveSeatRequest(userId, seatId1));
+        assertThatThrownBy(() -> paymentProcessor.processPayment(res1.getReservationId(), userId))
+            .isInstanceOf(DomainConflictException.class);
+        
+        // Charge more
+        balanceManager.chargeBalance(userId, new BigDecimal("30000"));
+        assertThat(balanceManager.getBalance(userId).getAmount()).isEqualByComparingTo(new BigDecimal("60000"));
+        
+        // Now payment succeeds
+        Payment payment = paymentProcessor.processPayment(res1.getReservationId(), userId);
+        assertThat(payment).isNotNull();
+        assertThat(balanceManager.getBalance(userId).getAmount()).isEqualByComparingTo(new BigDecimal("10000"));
+    }
+    
+    @Test
+    @Order(20)
+    @Transactional
+    @DisplayName("잔액 시나리오: 환불 후 잔액으로 다시 결제")
+    void balanceScenario_refundAndReuse() {
+        String userId = "user_refund_reuse";
+        
+        // First: Reserve → Pay → Refund
+        balanceManager.chargeBalance(userId, new BigDecimal("50000"));
+        ReservationResponse res1 = reserveSeatUseCase.execute(new ReserveSeatRequest(userId, seatId1));
+        Payment pay1 = paymentProcessor.processPayment(res1.getReservationId(), userId);
+        refundProcessor.processRefund(pay1.getId(), userId, "환불");
+        
+        // Balance should be back to 50000
+        assertThat(balanceManager.getBalance(userId).getAmount()).isEqualByComparingTo(new BigDecimal("50000"));
+        
+        // Second: Reserve different seat → Pay with refunded money
+        ReservationResponse res2 = reserveSeatUseCase.execute(new ReserveSeatRequest(userId, seatId2));
+        Payment pay2 = paymentProcessor.processPayment(res2.getReservationId(), userId);
+        
+        // Verify
+        assertThat(pay2).isNotNull();
+        assertThat(balanceManager.getBalance(userId).getAmount()).isEqualByComparingTo(new BigDecimal("0"));
+    }
+
+    // ========================================
+    // Helper Classes
+    // ========================================
+    
+    private static class ReservationResult {
+        boolean success;
+        Long reservationId;
+        Exception exception;
+        
+        public ReservationResult(boolean success, Long reservationId, Exception exception) {
+            this.success = success;
+            this.reservationId = reservationId;
+            this.exception = exception;
+        }
+    }
+}

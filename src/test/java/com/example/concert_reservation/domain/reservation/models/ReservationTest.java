@@ -90,16 +90,39 @@ class ReservationTest {
     }
     
     @Test
-    @DisplayName("PENDING이 아닌 예약은 취소할 수 없다")
-    void cancel_fromNonPending_throwsException() {
+    @DisplayName("CONFIRMED 예약도 취소할 수 있다 (환불 시나리오)")
+    void cancel_fromConfirmed_success() {
         // given
         Reservation reservation = Reservation.of(1L, "user123", 1L, 1L, new BigDecimal("50000"),
             ReservationStatus.CONFIRMED, LocalDateTime.now(), LocalDateTime.now().plusMinutes(5));
         
+        // when
+        reservation.cancel();
+        
+        // then
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+    }
+    
+    @Test
+    @DisplayName("CANCELLED 또는 EXPIRED 예약은 취소할 수 없다")
+    void cancel_fromCancelledOrExpired_throwsException() {
+        // given - CANCELLED 예약
+        Reservation cancelledReservation = Reservation.of(1L, "user123", 1L, 1L, new BigDecimal("50000"),
+            ReservationStatus.CANCELLED, LocalDateTime.now(), LocalDateTime.now().plusMinutes(5));
+        
         // when & then
-        assertThatThrownBy(() -> reservation.cancel())
+        assertThatThrownBy(() -> cancelledReservation.cancel())
             .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("임시 예약 상태만 취소할 수 있습니다");
+            .hasMessageContaining("임시 예약 또는 확정된 예약만 취소할 수 있습니다");
+        
+        // given - EXPIRED 예약
+        Reservation expiredReservation = Reservation.of(2L, "user456", 2L, 2L, new BigDecimal("50000"),
+            ReservationStatus.EXPIRED, LocalDateTime.now(), LocalDateTime.now().plusMinutes(5));
+        
+        // when & then
+        assertThatThrownBy(() -> expiredReservation.cancel())
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("임시 예약 또는 확정된 예약만 취소할 수 있습니다");
     }
     
     @Test
