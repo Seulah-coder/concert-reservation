@@ -86,7 +86,9 @@ class QueueTokenControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
             .andDo(print())
-            .andExpect(status().is5xxServerError());  // IllegalStateException
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.status").value(409))
+            .andExpect(jsonPath("$.message").exists());
     }
     
     @Test
@@ -129,7 +131,9 @@ class QueueTokenControllerTest {
         mockMvc.perform(get("/api/v1/queue/status")
                 .header("X-Queue-Token", invalidToken))
             .andDo(print())
-            .andExpect(status().is5xxServerError());  // IllegalArgumentException
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.status").value(400))
+            .andExpect(jsonPath("$.message").exists());
     }
     
     @Test
