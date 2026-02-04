@@ -35,3 +35,11 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Test Execution Logs and Build Artifacts ###
+*TEST*.md
+*SUMMARY*.md
+*REPORT*.md
+*LOG*.md
+*.log
+*.backup
