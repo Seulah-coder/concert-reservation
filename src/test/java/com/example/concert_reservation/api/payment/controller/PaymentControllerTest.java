@@ -4,6 +4,9 @@ import com.example.concert_reservation.api.payment.dto.PaymentResponse;
 import com.example.concert_reservation.api.payment.dto.ProcessPaymentRequest;
 import com.example.concert_reservation.api.payment.usecase.ProcessPaymentUseCase;
 import com.example.concert_reservation.domain.payment.models.PaymentStatus;
+import com.example.concert_reservation.support.exception.DomainConflictException;
+import com.example.concert_reservation.support.exception.DomainForbiddenException;
+import com.example.concert_reservation.support.exception.DomainNotFoundException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,14 +100,14 @@ class PaymentControllerTest {
     }
     
     @Test
-    @DisplayName("예약이 없으면 400 에러")
+    @DisplayName("예약이 없으면 404 에러")
     void processPayment_reservationNotFound_throwsException() throws Exception {
         // given
         Long reservationId = 999L;
         String userId = "user123";
         
         given(processPaymentUseCase.execute(reservationId, userId))
-            .willThrow(new IllegalArgumentException("예약을 찾을 수 없습니다"));
+            .willThrow(new DomainNotFoundException("예약을 찾을 수 없습니다"));
         
         ProcessPaymentRequest request = new ProcessPaymentRequest(reservationId, userId);
         
@@ -112,7 +115,7 @@ class PaymentControllerTest {
         mockMvc.perform(post("/api/payments")
                 .contentType(APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isNotFound());
     }
     
     @Test
@@ -123,7 +126,7 @@ class PaymentControllerTest {
         String userId = "hacker";
         
         given(processPaymentUseCase.execute(reservationId, userId))
-            .willThrow(new IllegalArgumentException("본인의 예약만 결제할 수 있습니다"));
+            .willThrow(new DomainForbiddenException("본인의 예약만 결제할 수 있습니다"));
         
         ProcessPaymentRequest request = new ProcessPaymentRequest(reservationId, userId);
         
@@ -131,7 +134,7 @@ class PaymentControllerTest {
         mockMvc.perform(post("/api/payments")
                 .contentType(APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isForbidden());
     }
     
     @Test
@@ -142,7 +145,7 @@ class PaymentControllerTest {
         String userId = "user123";
         
         given(processPaymentUseCase.execute(reservationId, userId))
-            .willThrow(new IllegalStateException("잔액이 부족합니다"));
+            .willThrow(new DomainConflictException("잔액이 부족합니다"));
         
         ProcessPaymentRequest request = new ProcessPaymentRequest(reservationId, userId);
         

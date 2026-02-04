@@ -11,6 +11,8 @@ import com.example.concert_reservation.domain.payment.models.Payment;
 import com.example.concert_reservation.domain.reservation.components.ReservationManager;
 import com.example.concert_reservation.domain.reservation.models.Reservation;
 import com.example.concert_reservation.domain.reservation.models.ReservationStatus;
+import com.example.concert_reservation.support.exception.DomainConflictException;
+import com.example.concert_reservation.support.exception.DomainForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -107,7 +109,7 @@ class PaymentIntegrationTest {
         
         // when & then: 사용자B가 사용자A의 예약을 결제하려고 시도
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservation.getId(), userB))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainForbiddenException.class)
             .hasMessageContaining("본인의 예약만 결제할 수 있습니다");
         
         // 사용자B의 잔액은 차감되지 않음
@@ -134,7 +136,7 @@ class PaymentIntegrationTest {
         
         // when & then: 결제 시도 실패
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservation.getId(), userId))
-            .isInstanceOf(IllegalStateException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("잔액이 부족합니다");
         
         // 예약은 여전히 PENDING 상태
@@ -163,7 +165,7 @@ class PaymentIntegrationTest {
         
         // when & then: 동일한 예약에 대해 두 번째 결제 시도
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservation.getId(), userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("예약 상태가 올바르지 않습니다"); // CONFIRMED 상태라서 결제 불가
         
         // 잔액은 한 번만 차감됨 (200000 - 50000 = 150000)
@@ -187,7 +189,7 @@ class PaymentIntegrationTest {
         
         // when & then: 취소된 예약 결제 시도
         assertThatThrownBy(() -> paymentProcessor.processPayment(reservation.getId(), userId))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(DomainConflictException.class)
             .hasMessageContaining("예약 상태가 올바르지 않습니다");
         
         // 잔액은 차감되지 않음
