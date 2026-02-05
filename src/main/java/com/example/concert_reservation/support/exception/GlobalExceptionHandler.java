@@ -36,7 +36,7 @@ public class GlobalExceptionHandler {
                 errorCode.getCode(), e.getMessage(), e.getData(), e);
             case WARN -> log.warn("[{}] {} - data: {}", 
                 errorCode.getCode(), e.getMessage(), e.getData());
-            default -> log.info("[{}] {} - data: {}", 
+            case INFO -> log.info("[{}] {} - data: {}", 
                 errorCode.getCode(), e.getMessage(), e.getData());
         }
         
