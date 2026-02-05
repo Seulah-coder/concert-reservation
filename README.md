@@ -373,7 +373,8 @@ Based on concurrency testing:
 
 **대기열에 의해 보호받는 API**:
 - 현재 구현: 폴링용 API (`GET /api/v1/queue/status`)에서 토큰 검증
-- 예약/결제 API는 비즈니스 로직에서 토큰 상태 확인
+- `QueueTokenInterceptor`를 통해 비즈니스 로직 진입 전 인터셉터 레벨에서 토큰 상태 검증
+- 인터셉터 보호 경로: `/api/v1/reservations/**`, `/api/payments/**`, `/api/refunds/**`
 
 **관련 파일**:
 - [QueueToken.java](src/main/java/com/example/concert_reservation/domain/queue/models/QueueToken.java) - UUID 기반 토큰 생성
