@@ -1,24 +1,23 @@
 package com.example.concert_reservation.domain.queue.components;
 
-import com.example.concert_reservation.domain.queue.models.QueueStatus;
+import com.example.concert_reservation.domain.queue.infrastructure.RedisQueueRepository;
 import com.example.concert_reservation.domain.queue.models.QueueToken;
 import com.example.concert_reservation.domain.queue.models.UserQueue;
-import com.example.concert_reservation.domain.queue.repositories.QueueStoreRepository;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 
 /**
  * 대기열 검증 컴포넌트 (도메인 서비스)
- * 대기열 관련 비즈니스 검증 로직을 담당
+ * Redis 기반 대기열 관리
  */
 @Component
 public class QueueValidator {
     
-    private final QueueStoreRepository queueStoreRepository;
+    private final RedisQueueRepository redisQueueRepository;
     
-    public QueueValidator(QueueStoreRepository queueStoreRepository) {
-        this.queueStoreRepository = queueStoreRepository;
+    public QueueValidator(RedisQueueRepository redisQueueRepository) {
+        this.redisQueueRepository = redisQueueRepository;
     }
     
     /**
@@ -27,14 +26,7 @@ public class QueueValidator {
      * @return 활성 상태이면 true
      */
     public boolean isActiveToken(QueueToken token) {
-        Optional<UserQueue> queueOpt = queueStoreRepository.findByToken(token);
-        
-        if (queueOpt.isEmpty()) {
-            return false;
-        }
-        
-        UserQueue queue = queueOpt.get();
-        return queue.isActive();
+        return redisQueueRepository.isActiveToken(token.getValue());
     }
     
     /**
@@ -43,7 +35,7 @@ public class QueueValidator {
      * @return 활성 대기열이 있으면 true
      */
     public boolean hasActiveQueue(String userId) {
-        return queueStoreRepository.existsByUserIdAndStatus(userId, QueueStatus.ACTIVE);
+        return redisQueueRepository.hasActiveQueue(userId);
     }
     
     /**
@@ -52,7 +44,7 @@ public class QueueValidator {
      * @return 대기 중인 대기열이 있으면 true
      */
     public boolean hasWaitingQueue(String userId) {
-        return queueStoreRepository.existsByUserIdAndStatus(userId, QueueStatus.WAITING);
+        return redisQueueRepository.hasWaitingQueue(userId);
     }
     
     /**
@@ -62,7 +54,7 @@ public class QueueValidator {
      * @throws IllegalArgumentException 토큰이 유효하지 않은 경우
      */
     public UserQueue validateAndGetQueue(QueueToken token) {
-        return queueStoreRepository.findByToken(token)
+        return redisQueueRepository.findByToken(token)
             .orElseThrow(() -> new IllegalArgumentException("유효하지 않은 토큰입니다"));
     }
     
@@ -72,25 +64,17 @@ public class QueueValidator {
      * @throws IllegalStateException 토큰이 활성 상태가 아닌 경우
      */
     public void validateActiveToken(QueueToken token) {
-        UserQueue queue = validateAndGetQueue(token);
-        
-        if (!queue.isActive()) {
-            throw new IllegalStateException(
-                "토큰이 활성 상태가 아닙니다. 현재 상태: " + queue.getStatus()
-            );
+        if (!isActiveToken(token)) {
+            throw new IllegalStateException("토큰이 활성 상태가 아닙니다");
         }
     }
     
     /**
      * 대기열 앞에 있는 사람 수 조회
      * @param queueNumber 조회할 대기 번호
-     * @return 앞에 대기 중인 사람 수 (WAITING 상태이면서 queueNumber가 더 작은 사람들)
+     * @return 앞에 대기 중인 사람 수
      */
     public long countWaitingAhead(Long queueNumber) {
-        // 실제로 대기 중이면서 현재 번호보다 앞선 사람들을 카운트
-        return queueStoreRepository.countByStatusAndQueueNumberLessThan(
-            QueueStatus.WAITING, 
-            queueNumber
-        );
+        return redisQueueRepository.countWaitingAhead(queueNumber);
     }
 }

@@ -41,3 +41,8 @@ out/
 *LOG*.md
 *.log
 *.backup
+generate_tokens.bat
+gradlew
+KEYS
+ZCARD
+
