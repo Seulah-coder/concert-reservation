@@ -40,13 +40,16 @@ public class HttpLoggingInterceptor implements HandlerInterceptor {
             .filter(this::isLoggableHeader)
             .map(name -> name + "=" + request.getHeader(name))
             .collect(Collectors.joining(", "));
+
+        // 쿼리 파라미터는 민감 정보가 포함될 수 있으므로 내용은 로깅하지 않음
+        String paramsInfo = request.getQueryString() != null ? "[omitted]" : "none";
         
         log.info("[{}] HTTP Request: {} {} | Headers: {{{}}} | Params: {}", 
             requestId,
             request.getMethod(),
             request.getRequestURI(),
             headers,
-            request.getQueryString() != null ? request.getQueryString() : "none");
+            paramsInfo);
         
         return true;
     }
