@@ -36,6 +36,8 @@ public class RedisQueueRepository {
     private static final String WAITING_KEY = "queue:waiting";
     private static final String ACTIVE_KEY_PREFIX = "queue:active:";
     private static final String TOKEN_KEY_PREFIX = "queue:token:";
+    private static final String USER_ACTIVE_KEY_PREFIX = "user:active:";
+    private static final String USER_WAITING_KEY_PREFIX = "user:waiting:";
     
     private final RedisTemplate<String, String> redisTemplate;
     
@@ -45,26 +47,40 @@ public class RedisQueueRepository {
     
     /**
      * 대기열에 토큰 추가 (Sorted Set)
+     * Pipeline으로 원자성 보장, TTL 설정으로 메모리 누수 방지
      */
     public UserQueue addToWaitingQueue(String userId) {
         QueueToken token = QueueToken.generate();
         LocalDateTime now = LocalDateTime.now();
         long score = now.toEpochSecond(ZoneOffset.UTC);
-        
-        // Waiting Queue에 추가
-        redisTemplate.opsForZSet().add(WAITING_KEY, token.getValue(), score);
-        
-        // 대기 번호 계산 (현재 위치 + 1)
-        long queueNumber = getWaitingPosition(token.getValue()) + 1;
-        
-        // Token Metadata 저장
         String tokenKey = TOKEN_KEY_PREFIX + token.getValue();
-        redisTemplate.opsForHash().put(tokenKey, "userId", userId);
-        redisTemplate.opsForHash().put(tokenKey, "status", QueueStatus.WAITING.name());
-        redisTemplate.opsForHash().put(tokenKey, "enteredAt", now.toString());
+        
+        // Pipeline으로 모든 명령 원자적 실행
+        redisTemplate.executePipelined((org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+            // Waiting Queue에 추가
+            connection.zAdd(WAITING_KEY.getBytes(), score, token.getValue().getBytes());
+            
+            // Token Metadata 저장
+            connection.hSet(tokenKey.getBytes(), "userId".getBytes(), userId.getBytes());
+            connection.hSet(tokenKey.getBytes(), "status".getBytes(), QueueStatus.WAITING.name().getBytes());
+            connection.hSet(tokenKey.getBytes(), "enteredAt".getBytes(), now.toString().getBytes());
+            
+            return null;
+        });
+        
+        // 대기 번호 계산 (Pipeline 외부에서 계산)
+        long queueNumber = getWaitingPosition(token.getValue()) + 1;
         redisTemplate.opsForHash().put(tokenKey, "queueNumber", String.valueOf(queueNumber));
         
-        // UserQueue 객체 생성 (생성된 token 사용)
+        // userId → token 역매핑 (TTL 30분 설정으로 메모리 누수 방지)
+        redisTemplate.opsForValue().set(
+            USER_WAITING_KEY_PREFIX + userId, 
+            token.getValue(),
+            30,  // 30분 후 자동 삭제 (Active 5분 + 버퍼)
+            java.util.concurrent.TimeUnit.MINUTES
+        );
+        
+        // UserQueue 객체 생성
         return UserQueue.of(
             null,
             token,
@@ -102,6 +118,7 @@ public class RedisQueueRepository {
     
     /**
      * Waiting Queue에서 N개의 토큰을 Active로 전환
+     * Pipeline으로 원자성 보장
      */
     public List<String> activateTokens(int count) {
         // Waiting Queue에서 상위 N개 가져오기 (Score 오름차순)
@@ -121,18 +138,35 @@ public class RedisQueueRepository {
             String userId = (String) redisTemplate.opsForHash().get(tokenKey, "userId");
             
             if (userId != null) {
-                // Active Queue에 추가
-                String activeKey = ACTIVE_KEY_PREFIX + token;
-                redisTemplate.opsForHash().put(activeKey, "userId", userId);
-                redisTemplate.opsForHash().put(activeKey, "activatedAt", now.toString());
-                redisTemplate.opsForHash().put(activeKey, "expiredAt", expiredAt.toString());
+                // Pipeline으로 활성화 작업 원자적 실행
+                redisTemplate.executePipelined((org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+                    String activeKey = ACTIVE_KEY_PREFIX + token;
+                    
+                    // Active Queue에 추가
+                    connection.hSet(activeKey.getBytes(), "userId".getBytes(), userId.getBytes());
+                    connection.hSet(activeKey.getBytes(), "activatedAt".getBytes(), now.toString().getBytes());
+                    connection.hSet(activeKey.getBytes(), "expiredAt".getBytes(), expiredAt.toString().getBytes());
+                    
+                    // Token Metadata 업데이트
+                    connection.hSet(tokenKey.getBytes(), "status".getBytes(), QueueStatus.ACTIVE.name().getBytes());
+                    connection.hSet(tokenKey.getBytes(), "expiredAt".getBytes(), expiredAt.toString().getBytes());
+                    
+                    // Waiting Queue에서 제거
+                    connection.zRem(WAITING_KEY.getBytes(), token.getBytes());
+                    
+                    // 역매핑 Waiting 제거
+                    connection.del((USER_WAITING_KEY_PREFIX + userId).getBytes());
+                    
+                    return null;
+                });
                 
-                // Token Metadata 업데이트
-                redisTemplate.opsForHash().put(tokenKey, "status", QueueStatus.ACTIVE.name());
-                redisTemplate.opsForHash().put(tokenKey, "expiredAt", expiredAt.toString());
-                
-                // Waiting Queue에서 제거
-                redisTemplate.opsForZSet().remove(WAITING_KEY, token);
+                // Active 역매핑 추가 (TTL 5분: Active 만료 시간과 동일)
+                redisTemplate.opsForValue().set(
+                    USER_ACTIVE_KEY_PREFIX + userId, 
+                    token,
+                    5,  // Active 토큰 만료 시간과 동일
+                    java.util.concurrent.TimeUnit.MINUTES
+                );
                 
                 activatedTokens.add(token);
             }
@@ -196,43 +230,20 @@ public class RedisQueueRepository {
     
     /**
      * 사용자가 Active 토큰을 보유하고 있는지 확인
+     * O(1) - 유저당 토큰 1개 제약 활용
      */
     public boolean hasActiveQueue(String userId) {
-        Set<String> keys = redisTemplate.keys(ACTIVE_KEY_PREFIX + "*");
-        
-        if (keys == null) {
-            return false;
-        }
-        
-        for (String key : keys) {
-            String storedUserId = (String) redisTemplate.opsForHash().get(key, "userId");
-            if (userId.equals(storedUserId)) {
-                return true;
-            }
-        }
-        
-        return false;
+        Boolean exists = redisTemplate.hasKey(USER_ACTIVE_KEY_PREFIX + userId);
+        return exists != null && exists;
     }
     
     /**
      * 사용자가 Waiting 토큰을 보유하고 있는지 확인
+     * O(1) - 유저당 토큰 1개 제약 활용
      */
     public boolean hasWaitingQueue(String userId) {
-        Set<String> tokens = redisTemplate.opsForZSet().range(WAITING_KEY, 0, -1);
-        
-        if (tokens == null) {
-            return false;
-        }
-        
-        for (String token : tokens) {
-            String tokenKey = TOKEN_KEY_PREFIX + token;
-            String storedUserId = (String) redisTemplate.opsForHash().get(tokenKey, "userId");
-            if (userId.equals(storedUserId)) {
-                return true;
-            }
-        }
-        
-        return false;
+        Boolean exists = redisTemplate.hasKey(USER_WAITING_KEY_PREFIX + userId);
+        return exists != null && exists;
     }
     
     /**
@@ -260,12 +271,21 @@ public class RedisQueueRepository {
             if (expiredAtStr != null) {
                 LocalDateTime expiredAt = LocalDateTime.parse(expiredAtStr);
                 if (now.isAfter(expiredAt)) {
+                    // Token과 userId 조회
+                    String token = key.replace(ACTIVE_KEY_PREFIX, "");
+                    String tokenKey = TOKEN_KEY_PREFIX + token;
+                    String userId = (String) redisTemplate.opsForHash().get(tokenKey, "userId");
+                    
                     // Active Queue에서 제거
                     redisTemplate.delete(key);
                     
-                    // Token Metadata에서도 제거
-                    String token = key.replace(ACTIVE_KEY_PREFIX, "");
-                    redisTemplate.delete(TOKEN_KEY_PREFIX + token);
+                    // Token Metadata에서 제거
+                    redisTemplate.delete(tokenKey);
+                    
+                    // 역매핑 제거
+                    if (userId != null) {
+                        redisTemplate.delete(USER_ACTIVE_KEY_PREFIX + userId);
+                    }
                     
                     removed++;
                 }
@@ -279,13 +299,23 @@ public class RedisQueueRepository {
      * 토큰 제거 (예약 완료 시)
      */
     public void removeToken(String token) {
+        // Token에서 userId 조회
+        String tokenKey = TOKEN_KEY_PREFIX + token;
+        String userId = (String) redisTemplate.opsForHash().get(tokenKey, "userId");
+        
         // Active Queue에서 제거
         redisTemplate.delete(ACTIVE_KEY_PREFIX + token);
         
         // Token Metadata에서 제거
-        redisTemplate.delete(TOKEN_KEY_PREFIX + token);
+        redisTemplate.delete(tokenKey);
         
         // Waiting Queue에서도 제거 (혹시 있다면)
         redisTemplate.opsForZSet().remove(WAITING_KEY, token);
+        
+        // 역매핑 제거
+        if (userId != null) {
+            redisTemplate.delete(USER_ACTIVE_KEY_PREFIX + userId);
+            redisTemplate.delete(USER_WAITING_KEY_PREFIX + userId);
+        }
     }
 }
