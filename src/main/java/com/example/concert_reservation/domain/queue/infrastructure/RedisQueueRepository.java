@@ -196,17 +196,16 @@ public class RedisQueueRepository {
         LocalDateTime expiredAt = expiredAtStr != null ? LocalDateTime.parse(expiredAtStr) : null;
         Long queueNumber = queueNumberStr != null ? Long.parseLong(queueNumberStr) : null;
         
-        // UserQueue 재구성
-        if (status == QueueStatus.WAITING && queueNumber != null) {
-            UserQueue queue = UserQueue.create(userId, queueNumber);
-            return Optional.of(queue);
-        } else if (status == QueueStatus.ACTIVE && expiredAt != null) {
-            UserQueue queue = UserQueue.create(userId, 0L);
-            queue.activate(30); // 30분 유효
-            return Optional.of(queue);
-        }
-        
-        return Optional.empty();
+        // UserQueue 재구성 (기존 token 사용)
+        return Optional.of(UserQueue.of(
+            null,  // Redis는 ID 미사용
+            token,  // 기존 token 사용 (중요!)
+            userId,
+            queueNumber != null ? queueNumber : 0L,
+            status,
+            enteredAt,
+            expiredAt
+        ));
     }
     
     /**
@@ -248,9 +247,21 @@ public class RedisQueueRepository {
     
     /**
      * 앞에 대기 중인 인원 수 계산
+     * Sorted Set에서 현재 토큰보다 score가 낮은(먼저 들어온) 토큰의 수
      */
     public long countWaitingAhead(Long queueNumber) {
-        return queueNumber - 1;
+        // Redis Sorted Set의 rank는 0-based이므로
+        // rank 자체가 앞에 있는 사람의 수와 동일
+        // queueNumber는 1-based이므로 -1
+        return Math.max(0, queueNumber - 1);
+    }
+    
+    /**
+     * 토큰으로 앞에 대기 중인 인원 수 계산 (정확한 방법)
+     */
+    public long countWaitingAheadByToken(String tokenValue) {
+        Long rank = redisTemplate.opsForZSet().rank(WAITING_KEY, tokenValue);
+        return rank != null ? rank : 0;
     }
     
     /**

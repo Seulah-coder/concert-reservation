@@ -5,11 +5,14 @@ import com.example.concert_reservation.api.queue.dto.IssueTokenResponse;
 import com.example.concert_reservation.api.queue.dto.QueueStatusResponse;
 import com.example.concert_reservation.domain.queue.models.QueueStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -36,6 +39,26 @@ class QueueTokenControllerTest {
     
     @Autowired
     private ObjectMapper objectMapper;
+    
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
+    
+    /**
+     * 각 테스트 전 Redis 데이터 정리
+     * Redis는 @Transactional 롤백이 적용되지 않으므로 수동 정리 필요
+     */
+    @BeforeEach
+    void clearRedis() {
+        redisTemplate.getConnectionFactory().getConnection().flushDb();
+    }
+    
+    /**
+     * 각 테스트 후 Redis 데이터 정리 (안전장치)
+     */
+    @AfterEach
+    void cleanupRedis() {
+        redisTemplate.getConnectionFactory().getConnection().flushDb();
+    }
     
     @Test
     @DisplayName("POST /api/v1/queue/token - 새로운 사용자는 토큰을 발급받을 수 있다")
@@ -139,25 +162,39 @@ class QueueTokenControllerTest {
     @Test
     @DisplayName("GET /api/v1/queue/status - 여러 사용자의 대기 순서가 올바르게 표시된다")
     void getQueueStatus_multipleUsers_correctWaitingAhead() throws Exception {
-        // given - 3명의 사용자 토큰 발급
+        // given - 3명의 사용자 토큰 발급 (약간의 지연으로 순서 보장)
         String token1 = issueTokenForUser("user1");
-        String token2 = issueTokenForUser("user2");
-        String token3 = issueTokenForUser("user3");
+        Thread.sleep(10);  // Redis 작업 완료 대기
         
-        // when & then - user3는 앞에 2명이 대기 중
+        String token2 = issueTokenForUser("user2");
+        Thread.sleep(10);  // Redis 작업 완료 대기
+        
+        String token3 = issueTokenForUser("user3");
+        Thread.sleep(10);  // Redis 작업 완료 대기
+        
+        // when & then - user1은 앞에 0명 (첫 번째)
+        mockMvc.perform(get("/api/v1/queue/status")
+                .header("X-Queue-Token", token1))
+            .andDo(print())
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.queueNumber").value(1))
+            .andExpect(jsonPath("$.waitingAhead").value(0));
+        
+        // user2는 앞에 1명
+        mockMvc.perform(get("/api/v1/queue/status")
+                .header("X-Queue-Token", token2))
+            .andDo(print())
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.queueNumber").value(2))
+            .andExpect(jsonPath("$.waitingAhead").value(1));
+        
+        // user3는 앞에 2명
         mockMvc.perform(get("/api/v1/queue/status")
                 .header("X-Queue-Token", token3))
             .andDo(print())
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.queueNumber").value(3))
             .andExpect(jsonPath("$.waitingAhead").value(2));
-        
-        // user1은 앞에 0명
-        mockMvc.perform(get("/api/v1/queue/status")
-                .header("X-Queue-Token", token1))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.queueNumber").value(1))
-            .andExpect(jsonPath("$.waitingAhead").value(0));
     }
     
     @Test

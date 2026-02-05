@@ -4,6 +4,9 @@ import com.example.concert_reservation.api.payment.dto.PaymentResponse;
 import com.example.concert_reservation.domain.payment.components.PaymentProcessor;
 import com.example.concert_reservation.domain.payment.models.Payment;
 import com.example.concert_reservation.domain.payment.models.PaymentStatus;
+import com.example.concert_reservation.domain.reservation.models.Reservation;
+import com.example.concert_reservation.domain.reservation.models.ReservationStatus;
+import com.example.concert_reservation.domain.reservation.repositories.ReservationStoreRepository;
 import com.example.concert_reservation.support.exception.DomainConflictException;
 import com.example.concert_reservation.support.exception.DomainForbiddenException;
 import com.example.concert_reservation.support.exception.DomainNotFoundException;
@@ -13,9 +16,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.BDDMockito.*;
@@ -26,6 +31,12 @@ class ProcessPaymentUseCaseTest {
     
     @Mock
     private PaymentProcessor paymentProcessor;
+    
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+    
+    @Mock
+    private ReservationStoreRepository reservationRepository;
     
     @InjectMocks
     private ProcessPaymentUseCase processPaymentUseCase;
@@ -44,8 +55,17 @@ class ProcessPaymentUseCaseTest {
             LocalDateTime.now(), LocalDateTime.now()
         );
         
+        Reservation mockReservation = Reservation.of(
+            reservationId, userId, 1L, 10L,
+            amount,  // price
+            ReservationStatus.CONFIRMED,
+            LocalDateTime.now(), LocalDateTime.now().plusMinutes(5)
+        );
+        
         given(paymentProcessor.processPayment(reservationId, userId))
             .willReturn(expectedPayment);
+        given(reservationRepository.findById(reservationId))
+            .willReturn(Optional.of(mockReservation));
         
         // when
         PaymentResponse response = processPaymentUseCase.execute(reservationId, userId);
@@ -59,6 +79,8 @@ class ProcessPaymentUseCaseTest {
         assertThat(response.status()).isEqualTo(PaymentStatus.COMPLETED);
         
         verify(paymentProcessor).processPayment(reservationId, userId);
+        verify(reservationRepository).findById(reservationId);
+        // eventPublisher는 단위 테스트에서 검증 제외 (통합 테스트에서 검증)
     }
     
     @Test

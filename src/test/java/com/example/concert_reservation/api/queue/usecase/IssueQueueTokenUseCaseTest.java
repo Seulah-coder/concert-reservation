@@ -3,10 +3,10 @@ package com.example.concert_reservation.api.queue.usecase;
 import com.example.concert_reservation.api.queue.dto.IssueTokenRequest;
 import com.example.concert_reservation.api.queue.dto.IssueTokenResponse;
 import com.example.concert_reservation.domain.queue.components.QueueValidator;
+import com.example.concert_reservation.domain.queue.infrastructure.RedisQueueRepository;
 import com.example.concert_reservation.domain.queue.models.QueueStatus;
 import com.example.concert_reservation.domain.queue.models.QueueToken;
 import com.example.concert_reservation.domain.queue.models.UserQueue;
-import com.example.concert_reservation.domain.queue.repositories.QueueStoreRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,7 +27,7 @@ import static org.mockito.Mockito.*;
 class IssueQueueTokenUseCaseTest {
     
     @Mock
-    private QueueStoreRepository queueStoreRepository;
+    private RedisQueueRepository redisQueueRepository;
     
     @Mock
     private QueueValidator queueValidator;
@@ -48,10 +48,9 @@ class IssueQueueTokenUseCaseTest {
         // given
         when(queueValidator.hasActiveQueue("user123")).thenReturn(false);
         when(queueValidator.hasWaitingQueue("user123")).thenReturn(false);
-        when(queueStoreRepository.getNextQueueNumber()).thenReturn(1L);
         
-        UserQueue savedQueue = UserQueue.create("user123", 1L);
-        when(queueStoreRepository.save(any(UserQueue.class))).thenReturn(savedQueue);
+        UserQueue newQueue = UserQueue.create("user123", 1L);
+        when(redisQueueRepository.addToWaitingQueue("user123")).thenReturn(newQueue);
         
         // when
         IssueTokenResponse response = useCase.execute(request);
@@ -65,8 +64,7 @@ class IssueQueueTokenUseCaseTest {
         
         verify(queueValidator).hasActiveQueue("user123");
         verify(queueValidator).hasWaitingQueue("user123");
-        verify(queueStoreRepository).getNextQueueNumber();
-        verify(queueStoreRepository).save(any(UserQueue.class));
+        verify(redisQueueRepository).addToWaitingQueue("user123");
     }
     
     @Test
@@ -81,7 +79,7 @@ class IssueQueueTokenUseCaseTest {
             .hasMessageContaining("이미 활성 상태의 토큰이 존재합니다");
         
         verify(queueValidator).hasActiveQueue("user123");
-        verify(queueStoreRepository, never()).save(any());
+        verify(redisQueueRepository, never()).addToWaitingQueue(any());
     }
     
     @Test
@@ -98,7 +96,7 @@ class IssueQueueTokenUseCaseTest {
         
         verify(queueValidator).hasActiveQueue("user123");
         verify(queueValidator).hasWaitingQueue("user123");
-        verify(queueStoreRepository, never()).save(any());
+        verify(redisQueueRepository, never()).addToWaitingQueue(any());
     }
     
     @Test
@@ -107,17 +105,16 @@ class IssueQueueTokenUseCaseTest {
         // given
         when(queueValidator.hasActiveQueue(anyString())).thenReturn(false);
         when(queueValidator.hasWaitingQueue(anyString())).thenReturn(false);
-        when(queueStoreRepository.getNextQueueNumber()).thenReturn(10L);
         
-        UserQueue savedQueue = UserQueue.create("user123", 10L);
-        when(queueStoreRepository.save(any(UserQueue.class))).thenReturn(savedQueue);
+        UserQueue queueWithNumber10 = UserQueue.create("user123", 10L);
+        when(redisQueueRepository.addToWaitingQueue("user123")).thenReturn(queueWithNumber10);
         
         // when
         IssueTokenResponse response = useCase.execute(request);
         
         // then
         assertThat(response.getQueueNumber()).isEqualTo(10L);
-        verify(queueStoreRepository).getNextQueueNumber();
+        verify(redisQueueRepository).addToWaitingQueue("user123");
     }
     
     @Test
@@ -129,13 +126,11 @@ class IssueQueueTokenUseCaseTest {
         
         when(queueValidator.hasActiveQueue(anyString())).thenReturn(false);
         when(queueValidator.hasWaitingQueue(anyString())).thenReturn(false);
-        when(queueStoreRepository.getNextQueueNumber()).thenReturn(1L, 2L);
         
         UserQueue queue1 = UserQueue.create("user1", 1L);
         UserQueue queue2 = UserQueue.create("user2", 2L);
-        when(queueStoreRepository.save(any(UserQueue.class)))
-            .thenReturn(queue1)
-            .thenReturn(queue2);
+        when(redisQueueRepository.addToWaitingQueue("user1")).thenReturn(queue1);
+        when(redisQueueRepository.addToWaitingQueue("user2")).thenReturn(queue2);
         
         // when
         IssueTokenResponse response1 = useCase.execute(request1);
@@ -146,6 +141,7 @@ class IssueQueueTokenUseCaseTest {
         assertThat(response2.getQueueNumber()).isEqualTo(2L);
         assertThat(response1.getToken()).isNotEqualTo(response2.getToken());
         
-        verify(queueStoreRepository, times(2)).save(any(UserQueue.class));
+        verify(redisQueueRepository).addToWaitingQueue("user1");
+        verify(redisQueueRepository).addToWaitingQueue("user2");
     }
 }
