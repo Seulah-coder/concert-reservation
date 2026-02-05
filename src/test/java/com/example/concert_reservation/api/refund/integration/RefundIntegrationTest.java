@@ -6,6 +6,9 @@ import com.example.concert_reservation.domain.balance.models.Balance;
 import com.example.concert_reservation.domain.balance.repositories.BalanceRepository;
 import com.example.concert_reservation.domain.payment.models.Payment;
 import com.example.concert_reservation.domain.payment.repositories.PaymentRepository;
+import com.example.concert_reservation.domain.queue.models.QueueStatus;
+import com.example.concert_reservation.domain.queue.models.UserQueue;
+import com.example.concert_reservation.domain.queue.repositories.QueueStoreRepository;
 import com.example.concert_reservation.domain.refund.repositories.RefundRepository;
 import com.example.concert_reservation.domain.reservation.models.Reservation;
 import com.example.concert_reservation.domain.reservation.infrastructure.ReservationCoreStoreRepository;
@@ -21,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,10 +54,14 @@ class RefundIntegrationTest {
 
     @Autowired
     private RefundRepository refundRepository;
+    
+    @Autowired
+    private QueueStoreRepository queueStoreRepository;
 
     private static final AtomicLong userCounter = new AtomicLong(1);
     private static final AtomicLong concertCounter = new AtomicLong(1);
     private String userId;
+    private String queueToken;
     private BigDecimal initialBalance = new BigDecimal("100000");
     private BigDecimal seatPrice = new BigDecimal("50000");
 
@@ -67,6 +75,12 @@ class RefundIntegrationTest {
         Balance balance = Balance.create(userId);
         balance.charge(initialBalance);
         balanceRepository.save(balance);
+        
+        // Create ACTIVE queue token for integration test
+        UserQueue userQueue = UserQueue.create(userId, 1L);
+        userQueue.activate(30); // 30분 동안 유효
+        UserQueue savedQueue = queueStoreRepository.save(userQueue);
+        queueToken = savedQueue.getToken().getValue();
     }
 
     @Test
@@ -90,6 +104,7 @@ class RefundIntegrationTest {
 
         // When & Then
         mockMvc.perform(post("/api/refunds")
+                .header("X-Queue-Token", queueToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
             .andExpect(status().isNotFound());
@@ -102,6 +117,7 @@ class RefundIntegrationTest {
 
         // When & Then
         mockMvc.perform(post("/api/refunds")
+                .header("X-Queue-Token", queueToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(invalidRequest))
             .andExpect(status().isBadRequest());
@@ -115,6 +131,7 @@ class RefundIntegrationTest {
         ProcessRefundRequest request = new ProcessRefundRequest(paymentId, userId, "Test refund");
         
         mockMvc.perform(post("/api/refunds")
+                .header("X-Queue-Token", queueToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
             .andExpect(status().isNotFound()); // Should return 404 for non-existent payment

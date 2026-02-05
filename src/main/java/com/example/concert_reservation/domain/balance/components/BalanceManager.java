@@ -2,6 +2,8 @@ package com.example.concert_reservation.domain.balance.components;
 
 import com.example.concert_reservation.domain.balance.models.Balance;
 import com.example.concert_reservation.domain.balance.repositories.BalanceRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -12,6 +14,8 @@ import java.math.BigDecimal;
  */
 @Component
 public class BalanceManager {
+    
+    private static final Logger log = LoggerFactory.getLogger(BalanceManager.class);
     
     private final BalanceRepository balanceRepository;
     
@@ -50,9 +54,12 @@ public class BalanceManager {
      * @return 충전된 잔액
      */
     public Balance chargeBalance(String userId, BigDecimal amount) {
+        log.info("잔액 충전 시작 - userId: {}, amount: {}", userId, amount);
         Balance balance = getOrCreateBalance(userId);
         balance.charge(amount);
-        return balanceRepository.save(balance);
+        Balance saved = balanceRepository.save(balance);
+        log.info("잔액 충전 완료 - userId: {}, newBalance: {}", userId, saved.getAmount());
+        return saved;
     }
     
     /**
@@ -63,9 +70,12 @@ public class BalanceManager {
      * @throws IllegalStateException 잔액이 부족한 경우
      */
     public Balance useBalance(String userId, BigDecimal amount) {
+        log.info("잔액 사용 시작 - userId: {}, amount: {}", userId, amount);
         Balance balance = getBalance(userId);
         balance.use(amount);
-        return balanceRepository.save(balance);
+        Balance saved = balanceRepository.save(balance);
+        log.info("잔액 사용 완료 - userId: {}, newBalance: {}", userId, saved.getAmount());
+        return saved;
     }
     
     /**

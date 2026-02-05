@@ -9,6 +9,8 @@ import com.example.concert_reservation.domain.reservation.models.ReservationStat
 import com.example.concert_reservation.support.exception.DomainConflictException;
 import com.example.concert_reservation.support.exception.DomainForbiddenException;
 import com.example.concert_reservation.support.exception.DomainNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,6 +21,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class PaymentProcessor {
+    
+    private static final Logger log = LoggerFactory.getLogger(PaymentProcessor.class);
     
     private final PaymentRepository paymentRepository;
     private final ReservationManager reservationManager;
@@ -45,22 +49,28 @@ public class PaymentProcessor {
      * @throws DomainConflictException 예약 상태 불일치/중복 결제/잔액 부족
      */
     public Payment processPayment(Long reservationId, String userId) {
+        log.info("결제 처리 시작 - reservationId: {}, userId: {}", reservationId, userId);
+        
         // 1. 예약 조회
         Reservation reservation = reservationManager.getReservation(reservationId)
             .orElseThrow(() -> new DomainNotFoundException("예약을 찾을 수 없습니다: " + reservationId));
         
         // 2. 예약자 본인 확인
         if (!reservation.getUserId().equals(userId)) {
+            log.warn("결제 권한 없음 - reservationId: {}, requestUserId: {}, reservationUserId: {}", 
+                reservationId, userId, reservation.getUserId());
             throw new DomainForbiddenException("본인의 예약만 결제할 수 있습니다");
         }
         
         // 3. 예약 상태 확인 (PENDING만 결제 가능)
         if (reservation.getStatus() != ReservationStatus.PENDING) {
+            log.warn("예약 상태 불일치 - reservationId: {}, status: {}", reservationId, reservation.getStatus());
             throw new DomainConflictException("예약 상태가 올바르지 않습니다. 현재 상태: " + reservation.getStatus());
         }
         
         // 4. 중복 결제 방지
         paymentRepository.findByReservationId(reservationId).ifPresent(payment -> {
+            log.warn("중복 결제 시도 - reservationId: {}, existingPaymentId: {}", reservationId, payment.getId());
             throw new DomainConflictException("이미 결제된 예약입니다");
         });
         
@@ -68,6 +78,7 @@ public class PaymentProcessor {
         try {
             balanceManager.useBalance(userId, reservation.getPrice());
         } catch (IllegalStateException ex) {
+            log.warn("잔액 부족 - userId: {}, requiredAmount: {}", userId, reservation.getPrice());
             throw new DomainConflictException(ex.getMessage());
         }
         
@@ -76,6 +87,11 @@ public class PaymentProcessor {
         
         // 7. 결제 정보 저장
         Payment payment = Payment.create(reservationId, userId, reservation.getPrice());
-        return paymentRepository.save(payment);
+        Payment saved = paymentRepository.save(payment);
+        
+        log.info("결제 처리 완료 - paymentId: {}, reservationId: {}, userId: {}, amount: {}", 
+            saved.getId(), reservationId, userId, reservation.getPrice());
+        
+        return saved;
     }
 }

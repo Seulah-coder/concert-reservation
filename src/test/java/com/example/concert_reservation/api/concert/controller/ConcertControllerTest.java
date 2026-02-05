@@ -4,6 +4,7 @@ import com.example.concert_reservation.api.concert.dto.AvailableDateResponse;
 import com.example.concert_reservation.api.concert.dto.SeatResponse;
 import com.example.concert_reservation.api.concert.usecase.GetAvailableDatesUseCase;
 import com.example.concert_reservation.api.concert.usecase.GetSeatsUseCase;
+import com.example.concert_reservation.config.QueueTokenInterceptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,9 @@ class ConcertControllerTest {
     
     @MockBean
     private GetSeatsUseCase getSeatsUseCase;
+    
+    @MockBean
+    private QueueTokenInterceptor queueTokenInterceptor;
     
     @Test
     @DisplayName("GET /api/v1/concerts/dates - 예약 가능한 콘서트 날짜 조회 성공")

@@ -3,11 +3,13 @@ package com.example.concert_reservation.api.payment.controller;
 import com.example.concert_reservation.api.payment.dto.PaymentResponse;
 import com.example.concert_reservation.api.payment.dto.ProcessPaymentRequest;
 import com.example.concert_reservation.api.payment.usecase.ProcessPaymentUseCase;
+import com.example.concert_reservation.config.QueueTokenInterceptor;
 import com.example.concert_reservation.domain.payment.models.PaymentStatus;
 import com.example.concert_reservation.support.exception.DomainConflictException;
 import com.example.concert_reservation.support.exception.DomainForbiddenException;
 import com.example.concert_reservation.support.exception.DomainNotFoundException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.*;
 import static org.springframework.http.MediaType.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -35,6 +38,15 @@ class PaymentControllerTest {
     
     @MockitoBean
     private ProcessPaymentUseCase processPaymentUseCase;
+    
+    @MockitoBean
+    private QueueTokenInterceptor queueTokenInterceptor;
+    
+    @BeforeEach
+    void setUp() throws Exception {
+        // Interceptor를 통과시켜 컨트롤러 로직 테스트에 집중
+        given(queueTokenInterceptor.preHandle(any(), any(), any())).willReturn(true);
+    }
     
     @Test
     @DisplayName("결제 처리 성공 - POST /api/payments")
