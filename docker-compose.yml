@@ -14,6 +14,28 @@ services:
       timeout: 3s
       retries: 3
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: concert-reservation-postgres
+    environment:
+      POSTGRES_DB: concert_reservation
+      POSTGRES_USER: concert_user
+      POSTGRES_PASSWORD: concert_pass
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+      TZ: Asia/Seoul
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U concert_user -d concert_reservation"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   redis-data:
+    driver: local
+  postgres-data:
     driver: local
