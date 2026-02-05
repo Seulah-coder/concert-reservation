@@ -15,17 +15,15 @@ public class Balance {
     private BigDecimal amount;
     private final LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private final Long version;
     
     // 생성자 (불변 필드만)
     private Balance(Long id, String userId, BigDecimal amount, 
-                    LocalDateTime createdAt, LocalDateTime updatedAt, Long version) {
+                    LocalDateTime createdAt, LocalDateTime updatedAt) {
         this.id = id;
         this.userId = userId;
         this.amount = amount;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
-        this.version = version;
     }
     
     /**
@@ -39,7 +37,7 @@ public class Balance {
         }
         
         LocalDateTime now = LocalDateTime.now();
-        return new Balance(null, userId, BigDecimal.ZERO, now, now, null);
+        return new Balance(null, userId, BigDecimal.ZERO, now, now);
     }
     
     /**
@@ -49,12 +47,11 @@ public class Balance {
      * @param amount 잔액
      * @param createdAt 생성 시간
      * @param updatedAt 수정 시간
-     * @param version 버전 (낙관적 잠금용)
      * @return 재구성된 Balance
      */
     public static Balance of(Long id, String userId, BigDecimal amount,
-                             LocalDateTime createdAt, LocalDateTime updatedAt, Long version) {
-        return new Balance(id, userId, amount, createdAt, updatedAt, version);
+                             LocalDateTime createdAt, LocalDateTime updatedAt) {
+        return new Balance(id, userId, amount, createdAt, updatedAt);
     }
     
     /**
@@ -138,10 +135,6 @@ public class Balance {
     
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
-    }
-    
-    public Long getVersion() {
-        return version;
     }
     
     @Override
