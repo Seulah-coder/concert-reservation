@@ -54,14 +54,26 @@ public class RedisQueueRepository {
         // Waiting Queue에 추가
         redisTemplate.opsForZSet().add(WAITING_KEY, token.getValue(), score);
         
+        // 대기 번호 계산 (현재 위치 + 1)
+        long queueNumber = getWaitingPosition(token.getValue()) + 1;
+        
         // Token Metadata 저장
         String tokenKey = TOKEN_KEY_PREFIX + token.getValue();
         redisTemplate.opsForHash().put(tokenKey, "userId", userId);
         redisTemplate.opsForHash().put(tokenKey, "status", QueueStatus.WAITING.name());
         redisTemplate.opsForHash().put(tokenKey, "enteredAt", now.toString());
-        redisTemplate.opsForHash().put(tokenKey, "queueNumber", String.valueOf(getWaitingPosition(token.getValue()) + 1));
+        redisTemplate.opsForHash().put(tokenKey, "queueNumber", String.valueOf(queueNumber));
         
-        return UserQueue.create(userId, getWaitingPosition(token.getValue()) + 1);
+        // UserQueue 객체 생성 (생성된 token 사용)
+        return UserQueue.of(
+            null,
+            token,
+            userId,
+            queueNumber,
+            QueueStatus.WAITING,
+            now,
+            null
+        );
     }
     
     /**
@@ -101,7 +113,7 @@ public class RedisQueueRepository {
         
         List<String> activatedTokens = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime expiredAt = now.plusMinutes(30); // 30분 후 만료
+        LocalDateTime expiredAt = now.plusMinutes(5); // 5분 후 만료
         
         for (String token : tokens) {
             // Token Metadata 조회

@@ -27,10 +27,10 @@ public class GetQueueStatusUseCase {
     }
     
     /**
-     * 대기열 상태 조회 (폴링용)
+     * 대기열 상태 조회 (폴링용) - Redis 기반
      * 
      * @param tokenValue 조회할 토큰 값
-     * @return 대기열 상태 정보 (대기 인원, 상태 등)
+     * @return 대기열 상태 정보 (대기 인원, 예상 대기 시간 등)
      * @throws IllegalArgumentException 토큰이 유효하지 않은 경우
      */
     @Transactional(readOnly = true)
@@ -41,8 +41,11 @@ public class GetQueueStatusUseCase {
         
         // 2. 앞에 대기 중인 인원 수 계산 (WAITING 상태일 때만)
         Long waitingAhead = 0L;
+        String estimatedWaitTime = "0분 0초";
+        
         if (queue.isWaiting()) {
             waitingAhead = queueValidator.countWaitingAhead(queue.getQueueNumber());
+            estimatedWaitTime = QueueActivationScheduler.getEstimatedWaitTimeString(queue.getQueueNumber());
         }
         
         // 3. 응답 DTO 변환
@@ -52,6 +55,7 @@ public class GetQueueStatusUseCase {
             queue.getQueueNumber(),
             queue.getStatus().name(),
             waitingAhead,
+            estimatedWaitTime,
             queue.getEnteredAt(),
             queue.getExpiredAt()
         );

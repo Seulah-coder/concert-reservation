@@ -69,13 +69,3 @@ public class IssueQueueTokenUseCase {
         );
     }
 }
-        
-        // 6. 응답 DTO 변환
-        return new IssueTokenResponse(
-            savedQueue.getToken().getValue(),
-            savedQueue.getQueueNumber(),
-            savedQueue.getStatus().name(),
-            savedQueue.getEnteredAt()
-        );
-    }
-}
