@@ -45,7 +45,6 @@ class BalanceStoreRepositoryTest {
         assertThat(saved.getAmount()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(saved.getCreatedAt()).isNotNull();
         assertThat(saved.getUpdatedAt()).isNotNull();
-        assertThat(saved.getVersion()).isNotNull();
     }
     
     @Test
@@ -89,7 +88,6 @@ class BalanceStoreRepositoryTest {
         // then
         assertThat(updated.getId()).isEqualTo(saved.getId());
         assertThat(updated.getAmount()).isEqualByComparingTo(new BigDecimal("50000"));
-        assertThat(updated.getVersion()).isNotNull();
     }
     
     @Test

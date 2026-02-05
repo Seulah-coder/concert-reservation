@@ -4,7 +4,9 @@ import com.example.concert_reservation.domain.balance.models.Balance;
 import com.example.concert_reservation.domain.balance.repositories.BalanceRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 
@@ -49,29 +51,58 @@ public class BalanceManager {
     
     /**
      * 잔액 충전
+     * 비관적 락을 사용하여 동시성 문제 방지
+     * 신규 사용자 첫 충전 시 race condition 처리 포함
      * @param userId 사용자 ID
      * @param amount 충전 금액
      * @return 충전된 잔액
      */
+    @Transactional
     public Balance chargeBalance(String userId, BigDecimal amount) {
         log.info("잔액 충전 시작 - userId: {}, amount: {}", userId, amount);
-        Balance balance = getOrCreateBalance(userId);
-        balance.charge(amount);
-        Balance saved = balanceRepository.save(balance);
-        log.info("잔액 충전 완료 - userId: {}, newBalance: {}", userId, saved.getAmount());
-        return saved;
+        
+        try {
+            // 비관적 락으로 조회 (동시성 제어)
+            Balance balance = balanceRepository.findByUserIdWithLock(userId)
+                .orElseGet(() -> {
+                    // 잔액이 없으면 새로 생성
+                    Balance newBalance = Balance.create(userId);
+                    return balanceRepository.save(newBalance);
+                });
+            
+            balance.charge(amount);
+            Balance saved = balanceRepository.save(balance);
+            log.info("잔액 충전 완료 - userId: {}, newBalance: {}", userId, saved.getAmount());
+            return saved;
+        } catch (DataIntegrityViolationException e) {
+            // 동시 생성 시 제약 조건 위반 - 재시도
+            log.debug("Balance 생성 충돌 감지, 재조회 시도 - userId: {}", userId);
+            Balance balance = balanceRepository.findByUserIdWithLock(userId)
+                .orElseThrow(() -> new IllegalStateException("잔액 생성 실패 - userId: " + userId));
+            
+            balance.charge(amount);
+            Balance saved = balanceRepository.save(balance);
+            log.info("잔액 충전 완료 (재시도) - userId: {}, newBalance: {}", userId, saved.getAmount());
+            return saved;
+        }
     }
     
     /**
      * 잔액 사용
+     * 비관적 락을 사용하여 동시성 문제 방지 (중요!)
      * @param userId 사용자 ID
      * @param amount 사용 금액
      * @return 사용 후 잔액
      * @throws IllegalStateException 잔액이 부족한 경우
      */
+    @Transactional
     public Balance useBalance(String userId, BigDecimal amount) {
         log.info("잔액 사용 시작 - userId: {}, amount: {}", userId, amount);
-        Balance balance = getBalance(userId);
+        
+        // 비관적 락으로 조회 (동시성 제어 - 가장 중요!)
+        Balance balance = balanceRepository.findByUserIdWithLock(userId)
+            .orElseThrow(() -> new IllegalArgumentException("잔액이 존재하지 않습니다. 사용자 ID: " + userId));
+        
         balance.use(amount);
         Balance saved = balanceRepository.save(balance);
         log.info("잔액 사용 완료 - userId: {}, newBalance: {}", userId, saved.getAmount());
@@ -80,14 +111,23 @@ public class BalanceManager {
     
     /**
      * 잔액 환불
+     * 비관적 락을 사용하여 동시성 문제 방지
      * @param userId 사용자 ID
      * @param amount 환불 금액
      * @return 환불 후 잔액
      */
+    @Transactional
     public Balance refundBalance(String userId, BigDecimal amount) {
-        Balance balance = getBalance(userId);
+        log.info("잔액 환불 시작 - userId: {}, amount: {}", userId, amount);
+        
+        // 비관적 락으로 조회 (동시성 제어)
+        Balance balance = balanceRepository.findByUserIdWithLock(userId)
+            .orElseThrow(() -> new IllegalArgumentException("잔액이 존재하지 않습니다. 사용자 ID: " + userId));
+        
         balance.refund(amount);
-        return balanceRepository.save(balance);
+        Balance saved = balanceRepository.save(balance);
+        log.info("잔액 환불 완료 - userId: {}, newBalance: {}", userId, saved.getAmount());
+        return saved;
     }
     
     /**

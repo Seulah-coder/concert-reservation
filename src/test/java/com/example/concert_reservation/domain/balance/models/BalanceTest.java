@@ -275,8 +275,7 @@ class BalanceTest {
             "user123", 
             new BigDecimal("50000"),
             now.minusDays(1),
-            now,
-            0L
+            now
         );
         
         // then
@@ -285,6 +284,5 @@ class BalanceTest {
         assertThat(balance.getAmount()).isEqualByComparingTo(new BigDecimal("50000"));
         assertThat(balance.getCreatedAt()).isEqualTo(now.minusDays(1));
         assertThat(balance.getUpdatedAt()).isEqualTo(now);
-        assertThat(balance.getVersion()).isEqualTo(0L);
     }
 }

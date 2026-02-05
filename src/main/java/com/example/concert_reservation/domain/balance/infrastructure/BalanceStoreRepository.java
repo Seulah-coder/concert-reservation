@@ -22,6 +22,12 @@ public class BalanceStoreRepository implements BalanceRepository {
     }
     
     @Override
+    public Optional<Balance> findByUserIdWithLock(String userId) {
+        return balanceJpaRepository.findByUserIdWithLock(userId)
+            .map(BalanceEntity::toDomain);
+    }
+    
+    @Override
     public Balance save(Balance balance) {
         if (balance.getId() == null) {
             // 새 엔티티 생성

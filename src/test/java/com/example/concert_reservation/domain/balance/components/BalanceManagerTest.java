@@ -81,7 +81,7 @@ class BalanceManagerTest {
         // given
         String userId = "user123";
         Balance balance = Balance.create(userId);
-        given(balanceRepository.findByUserId(userId)).willReturn(Optional.of(balance));
+        given(balanceRepository.findByUserIdWithLock(userId)).willReturn(Optional.of(balance));
         given(balanceRepository.save(any(Balance.class)))
             .willAnswer(invocation -> invocation.getArgument(0));
         
@@ -90,7 +90,7 @@ class BalanceManagerTest {
         
         // then
         assertThat(result.getAmount()).isEqualByComparingTo(new BigDecimal("10000"));
-        verify(balanceRepository).findByUserId(userId);
+        verify(balanceRepository).findByUserIdWithLock(userId);
         verify(balanceRepository).save(any(Balance.class));
     }
     
@@ -99,7 +99,7 @@ class BalanceManagerTest {
     void chargeBalance_notExisting_createsAndCharges() {
         // given
         String userId = "user123";
-        given(balanceRepository.findByUserId(userId)).willReturn(Optional.empty());
+        given(balanceRepository.findByUserIdWithLock(userId)).willReturn(Optional.empty());
         given(balanceRepository.save(any(Balance.class)))
             .willAnswer(invocation -> invocation.getArgument(0));
         
@@ -118,7 +118,7 @@ class BalanceManagerTest {
         String userId = "user123";
         Balance balance = Balance.create(userId);
         balance.charge(new BigDecimal("50000"));
-        given(balanceRepository.findByUserId(userId)).willReturn(Optional.of(balance));
+        given(balanceRepository.findByUserIdWithLock(userId)).willReturn(Optional.of(balance));
         given(balanceRepository.save(any(Balance.class)))
             .willAnswer(invocation -> invocation.getArgument(0));
         
@@ -127,7 +127,7 @@ class BalanceManagerTest {
         
         // then
         assertThat(result.getAmount()).isEqualByComparingTo(new BigDecimal("20000"));
-        verify(balanceRepository).findByUserId(userId);
+        verify(balanceRepository).findByUserIdWithLock(userId);
         verify(balanceRepository).save(any(Balance.class));
     }
     
@@ -138,14 +138,14 @@ class BalanceManagerTest {
         String userId = "user123";
         Balance balance = Balance.create(userId);
         balance.charge(new BigDecimal("10000"));
-        given(balanceRepository.findByUserId(userId)).willReturn(Optional.of(balance));
+        given(balanceRepository.findByUserIdWithLock(userId)).willReturn(Optional.of(balance));
         
         // when & then
         assertThatThrownBy(() -> balanceManager.useBalance(userId, new BigDecimal("20000")))
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("잔액이 부족합니다");
         
-        verify(balanceRepository).findByUserId(userId);
+        verify(balanceRepository).findByUserIdWithLock(userId);
         verify(balanceRepository, never()).save(any());
     }
     
@@ -154,7 +154,7 @@ class BalanceManagerTest {
     void useBalance_notExisting_throwsException() {
         // given
         String userId = "user123";
-        given(balanceRepository.findByUserId(userId)).willReturn(Optional.empty());
+        given(balanceRepository.findByUserIdWithLock(userId)).willReturn(Optional.empty());
         
         // when & then
         assertThatThrownBy(() -> balanceManager.useBalance(userId, new BigDecimal("10000")))
@@ -170,7 +170,7 @@ class BalanceManagerTest {
         Balance balance = Balance.create(userId);
         balance.charge(new BigDecimal("50000"));
         balance.use(new BigDecimal("30000"));
-        given(balanceRepository.findByUserId(userId)).willReturn(Optional.of(balance));
+        given(balanceRepository.findByUserIdWithLock(userId)).willReturn(Optional.of(balance));
         given(balanceRepository.save(any(Balance.class)))
             .willAnswer(invocation -> invocation.getArgument(0));
         
@@ -179,7 +179,7 @@ class BalanceManagerTest {
         
         // then
         assertThat(result.getAmount()).isEqualByComparingTo(new BigDecimal("35000"));
-        verify(balanceRepository).findByUserId(userId);
+        verify(balanceRepository).findByUserIdWithLock(userId);
         verify(balanceRepository).save(any(Balance.class));
     }
     

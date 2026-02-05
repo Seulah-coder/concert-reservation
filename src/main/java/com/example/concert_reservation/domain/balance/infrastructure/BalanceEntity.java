@@ -25,9 +25,6 @@ public class BalanceEntity {
     @Column(nullable = false)
     private LocalDateTime updatedAt;
     
-    @Version
-    private Long version;
-    
     protected BalanceEntity() {
     }
     
@@ -46,12 +43,11 @@ public class BalanceEntity {
             balance.getUpdatedAt()
         );
         entity.id = balance.getId();
-        entity.version = balance.getVersion();
         return entity;
     }
     
     public Balance toDomain() {
-        return Balance.of(id, userId, amount, createdAt, updatedAt, version);
+        return Balance.of(id, userId, amount, createdAt, updatedAt);
     }
     
     public void updateFrom(Balance balance) {
@@ -78,9 +74,5 @@ public class BalanceEntity {
     
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
-    }
-    
-    public Long getVersion() {
-        return version;
     }
 }
