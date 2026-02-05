@@ -4,6 +4,8 @@ import com.example.concert_reservation.domain.concert.components.SeatManager;
 import com.example.concert_reservation.domain.concert.models.Seat;
 import com.example.concert_reservation.domain.reservation.models.Reservation;
 import com.example.concert_reservation.domain.reservation.repositories.ReservationStoreRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -15,6 +17,8 @@ import java.util.List;
  */
 @Component
 public class ReservationManager {
+    
+    private static final Logger log = LoggerFactory.getLogger(ReservationManager.class);
     
     private final ReservationStoreRepository reservationStoreRepository;
     private final SeatManager seatManager;
@@ -60,7 +64,11 @@ public class ReservationManager {
      * @return 저장된 예약
      */
     public Reservation saveReservation(Reservation reservation) {
-        return reservationStoreRepository.save(reservation);
+        log.info("예약 저장 - userId: {}, seatId: {}, price: {}", 
+            reservation.getUserId(), reservation.getSeatId(), reservation.getPrice());
+        Reservation saved = reservationStoreRepository.save(reservation);
+        log.info("예약 저장 완료 - reservationId: {}", saved.getId());
+        return saved;
     }
     
     /**
@@ -69,9 +77,12 @@ public class ReservationManager {
      * @return 확정된 예약
      */
     public Reservation confirmReservation(Long reservationId) {
+        log.info("예약 확정 시작 - reservationId: {}", reservationId);
         Reservation reservation = getReservationById(reservationId);
         reservation.confirm();
-        return reservationStoreRepository.save(reservation);
+        Reservation confirmed = reservationStoreRepository.save(reservation);
+        log.info("예약 확정 완료 - reservationId: {}, status: {}", confirmed.getId(), confirmed.getStatus());
+        return confirmed;
     }
     
     /**

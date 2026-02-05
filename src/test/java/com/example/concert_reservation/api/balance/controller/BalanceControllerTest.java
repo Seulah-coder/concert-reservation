@@ -4,6 +4,7 @@ import com.example.concert_reservation.api.balance.dto.BalanceResponse;
 import com.example.concert_reservation.api.balance.dto.ChargeBalanceRequest;
 import com.example.concert_reservation.api.balance.usecase.ChargeBalanceUseCase;
 import com.example.concert_reservation.api.balance.usecase.GetBalanceUseCase;
+import com.example.concert_reservation.config.QueueTokenInterceptor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,9 @@ class BalanceControllerTest {
     
     @MockBean
     private GetBalanceUseCase getBalanceUseCase;
+    
+    @MockBean
+    private QueueTokenInterceptor queueTokenInterceptor;
     
     @Test
     @DisplayName("GET /api/balance/{userId} - 잔액 조회 성공")

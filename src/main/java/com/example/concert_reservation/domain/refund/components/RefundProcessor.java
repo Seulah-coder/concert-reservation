@@ -11,6 +11,8 @@ import com.example.concert_reservation.domain.reservation.models.ReservationStat
 import com.example.concert_reservation.support.exception.DomainConflictException;
 import com.example.concert_reservation.support.exception.DomainForbiddenException;
 import com.example.concert_reservation.support.exception.DomainNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,6 +23,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class RefundProcessor {
+    
+    private static final Logger log = LoggerFactory.getLogger(RefundProcessor.class);
 
     private final RefundRepository refundRepository;
     private final PaymentRepository paymentRepository;
@@ -51,17 +55,22 @@ public class RefundProcessor {
      * @throws DomainConflictException 이미 환불됨/예약 상태 불일치
      */
     public Refund processRefund(Long paymentId, String userId, String reason) {
+        log.info("환불 처리 시작 - paymentId: {}, userId: {}, reason: {}", paymentId, userId, reason);
+        
         // 1. 결제 정보 조회
         Payment payment = paymentRepository.findById(paymentId)
             .orElseThrow(() -> new DomainNotFoundException("결제를 찾을 수 없습니다: " + paymentId));
 
         // 2. 결제자 본인 확인
         if (!payment.getUserId().equals(userId)) {
+            log.warn("환불 권한 없음 - paymentId: {}, requestUserId: {}, paymentUserId: {}", 
+                paymentId, userId, payment.getUserId());
             throw new DomainForbiddenException("본인의 결제만 환불할 수 있습니다");
         }
 
         // 3. 이미 환불된 예약 확인
         refundRepository.findByPaymentId(paymentId).ifPresent(refund -> {
+            log.warn("중복 환불 시도 - paymentId: {}, existingRefundId: {}", paymentId, refund.getId());
             throw new DomainConflictException("이미 환불된 결제입니다");
         });
 
@@ -71,6 +80,8 @@ public class RefundProcessor {
 
         // 5. 예약 상태 확인 (CONFIRMED만 환불 가능)
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
+            log.warn("예약 상태 불일치 - reservationId: {}, status: {}", 
+                payment.getReservationId(), reservation.getStatus());
             throw new DomainConflictException("확정된 예약만 환불할 수 있습니다. 현재 상태: " + reservation.getStatus());
         }
 
@@ -78,6 +89,7 @@ public class RefundProcessor {
         try {
             balanceManager.chargeBalance(userId, payment.getAmount());
         } catch (IllegalStateException ex) {
+            log.error("잔액 복구 실패 - userId: {}, amount: {}", userId, payment.getAmount(), ex);
             throw new DomainConflictException("잔액 복구에 실패했습니다: " + ex.getMessage());
         }
 
@@ -93,6 +105,11 @@ public class RefundProcessor {
             reason
         );
         refund.approve();
-        return refundRepository.save(refund);
+        Refund saved = refundRepository.save(refund);
+        
+        log.info("환불 처리 완료 - refundId: {}, paymentId: {}, userId: {}, amount: {}", 
+            saved.getId(), paymentId, userId, payment.getAmount());
+        
+        return saved;
     }
 }
