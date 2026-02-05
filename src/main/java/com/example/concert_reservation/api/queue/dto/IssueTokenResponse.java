@@ -10,8 +10,10 @@ import java.time.LocalDateTime;
 public class IssueTokenResponse {
     
     private String token;
+    private String userId;
     private Long queueNumber;
     private String status;
+    private String estimatedWaitTime; // "X분 Y초" 형식
     
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime enteredAt;
@@ -20,6 +22,17 @@ public class IssueTokenResponse {
     public IssueTokenResponse() {
     }
     
+    public IssueTokenResponse(String token, String userId, Long queueNumber, String status, 
+                             String estimatedWaitTime, LocalDateTime enteredAt) {
+        this.token = token;
+        this.userId = userId;
+        this.queueNumber = queueNumber;
+        this.status = status;
+        this.estimatedWaitTime = estimatedWaitTime;
+        this.enteredAt = enteredAt;
+    }
+    
+    // 이전 버전과의 호환성을 위한 생성자
     public IssueTokenResponse(String token, Long queueNumber, String status, LocalDateTime enteredAt) {
         this.token = token;
         this.queueNumber = queueNumber;
@@ -33,6 +46,14 @@ public class IssueTokenResponse {
     
     public void setToken(String token) {
         this.token = token;
+    }
+    
+    public String getUserId() {
+        return userId;
+    }
+    
+    public void setUserId(String userId) {
+        this.userId = userId;
     }
     
     public Long getQueueNumber() {
@@ -49,6 +70,14 @@ public class IssueTokenResponse {
     
     public void setStatus(String status) {
         this.status = status;
+    }
+    
+    public String getEstimatedWaitTime() {
+        return estimatedWaitTime;
+    }
+    
+    public void setEstimatedWaitTime(String estimatedWaitTime) {
+        this.estimatedWaitTime = estimatedWaitTime;
     }
     
     public LocalDateTime getEnteredAt() {

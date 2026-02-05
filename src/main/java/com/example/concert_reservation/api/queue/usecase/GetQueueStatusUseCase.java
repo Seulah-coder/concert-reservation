@@ -1,6 +1,7 @@
 package com.example.concert_reservation.api.queue.usecase;
 
 import com.example.concert_reservation.api.queue.dto.QueueStatusResponse;
+import com.example.concert_reservation.domain.queue.components.QueueActivationScheduler;
 import com.example.concert_reservation.domain.queue.components.QueueValidator;
 import com.example.concert_reservation.domain.queue.models.QueueToken;
 import com.example.concert_reservation.domain.queue.models.UserQueue;
@@ -8,12 +9,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 대기열 상태 조회 유스케이스
+ * 대기열 상태 조회 유스케이스 (Redis 기반)
  * 
  * 비즈니스 흐름:
  * 1. 토큰으로 대기열 조회
  * 2. 대기 중이면 앞에 대기자 수 계산
- * 3. 상태 정보 반환 (폴링용)
+ * 3. 예상 대기 시간 계산
+ * 4. 상태 정보 반환 (폴링용)
  */
 @Service
 public class GetQueueStatusUseCase {

@@ -2,6 +2,8 @@ package com.example.concert_reservation.domain.concert.components;
 
 import com.example.concert_reservation.domain.concert.models.Seat;
 import com.example.concert_reservation.domain.concert.repositories.SeatStoreRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -20,10 +22,11 @@ public class SeatManager {
     }
     
     /**
-     * 특정 콘서트 날짜의 모든 좌석 조회
+     * 특정 콘서트 날짜의 모든 좌석 조회 (캐싱 적용)
      * @param concertDateId 콘서트 날짜 ID
      * @return 좌석 리스트
      */
+    @Cacheable(value = "seats", key = "#concertDateId")
     public List<Seat> getSeatsByConcert(Long concertDateId) {
         return seatStoreRepository.findByConcertDateId(concertDateId);
     }
@@ -54,10 +57,11 @@ public class SeatManager {
     }
     
     /**
-     * 좌석 임시 예약
+     * 좌석 임시 예약 (캐시 무효화)
      * @param seat 예약할 좌석
      * @return 예약된 좌석
      */
+    @CacheEvict(value = "seats", key = "#seat.concertDateId")
     public Seat reserveSeat(Seat seat) {
         validateAvailableForReservation(seat);
         seat.reserve();
@@ -65,10 +69,11 @@ public class SeatManager {
     }
     
     /**
-     * 좌석 판매 (결제 완료)
+     * 좌석 판매 (결제 완료) (캐시 무효화)
      * @param seat 판매할 좌석
      * @return 판매된 좌석
      */
+    @CacheEvict(value = "seats", key = "#seat.concertDateId")
     public Seat sellSeat(Seat seat) {
         if (!seat.isReserved()) {
             throw new IllegalStateException(
@@ -80,10 +85,11 @@ public class SeatManager {
     }
     
     /**
-     * 좌석 해제 (예약 취소)
+     * 좌석 해제 (예약 취소) (캐시 무효화)
      * @param seat 해제할 좌석
      * @return 해제된 좌석
      */
+    @CacheEvict(value = "seats", key = "#seat.concertDateId")
     public Seat releaseSeat(Seat seat) {
         if (!seat.isReserved()) {
             throw new IllegalStateException(

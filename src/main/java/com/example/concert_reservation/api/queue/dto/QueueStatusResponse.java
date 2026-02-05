@@ -14,6 +14,7 @@ public class QueueStatusResponse {
     private Long queueNumber;
     private String status;
     private Long waitingAhead;
+    private String estimatedWaitTime; // "X분 Y초" 형식
     
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime enteredAt;
@@ -25,6 +26,20 @@ public class QueueStatusResponse {
     public QueueStatusResponse() {
     }
     
+    public QueueStatusResponse(String token, String userId, Long queueNumber, String status,
+                               Long waitingAhead, String estimatedWaitTime, 
+                               LocalDateTime enteredAt, LocalDateTime expiredAt) {
+        this.token = token;
+        this.userId = userId;
+        this.queueNumber = queueNumber;
+        this.status = status;
+        this.waitingAhead = waitingAhead;
+        this.estimatedWaitTime = estimatedWaitTime;
+        this.enteredAt = enteredAt;
+        this.expiredAt = expiredAt;
+    }
+    
+    // 이전 버전과의 호환성을 위한 생성자
     public QueueStatusResponse(String token, String userId, Long queueNumber, String status,
                                Long waitingAhead, LocalDateTime enteredAt, LocalDateTime expiredAt) {
         this.token = token;
@@ -74,6 +89,14 @@ public class QueueStatusResponse {
     
     public void setWaitingAhead(Long waitingAhead) {
         this.waitingAhead = waitingAhead;
+    }
+    
+    public String getEstimatedWaitTime() {
+        return estimatedWaitTime;
+    }
+    
+    public void setEstimatedWaitTime(String estimatedWaitTime) {
+        this.estimatedWaitTime = estimatedWaitTime;
     }
     
     public LocalDateTime getEnteredAt() {
