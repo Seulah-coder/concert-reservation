@@ -1,9 +1,9 @@
 package com.example.concert_reservation.domain.queue.components;
 
+import com.example.concert_reservation.domain.queue.infrastructure.RedisQueueRepository;
 import com.example.concert_reservation.domain.queue.models.QueueStatus;
 import com.example.concert_reservation.domain.queue.models.QueueToken;
 import com.example.concert_reservation.domain.queue.models.UserQueue;
-import com.example.concert_reservation.domain.queue.repositories.QueueStoreRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,7 +26,7 @@ import static org.mockito.Mockito.*;
 class QueueValidatorTest {
     
     @Mock
-    private QueueStoreRepository queueStoreRepository;
+    private RedisQueueRepository redisQueueRepository;
     
     @InjectMocks
     private QueueValidator queueValidator;
@@ -60,23 +60,23 @@ class QueueValidatorTest {
     @DisplayName("활성 토큰은 isActiveToken()이 true를 반환한다")
     void isActiveToken_activeQueue_returnsTrue() {
         // given
-        when(queueStoreRepository.findByToken(activeToken))
-            .thenReturn(Optional.of(activeQueue));
+        when(redisQueueRepository.isActiveToken(activeToken.getValue()))
+            .thenReturn(true);
         
         // when
         boolean result = queueValidator.isActiveToken(activeToken);
         
         // then
         assertThat(result).isTrue();
-        verify(queueStoreRepository).findByToken(activeToken);
+        verify(redisQueueRepository).isActiveToken(activeToken.getValue());
     }
     
     @Test
     @DisplayName("대기 중인 토큰은 isActiveToken()이 false를 반환한다")
     void isActiveToken_waitingQueue_returnsFalse() {
         // given
-        when(queueStoreRepository.findByToken(waitingToken))
-            .thenReturn(Optional.of(waitingQueue));
+        when(redisQueueRepository.isActiveToken(waitingToken.getValue()))
+            .thenReturn(false);
         
         // when
         boolean result = queueValidator.isActiveToken(waitingToken);
@@ -89,8 +89,8 @@ class QueueValidatorTest {
     @DisplayName("존재하지 않는 토큰은 isActiveToken()이 false를 반환한다")
     void isActiveToken_notFound_returnsFalse() {
         // given
-        when(queueStoreRepository.findByToken(invalidToken))
-            .thenReturn(Optional.empty());
+        when(redisQueueRepository.isActiveToken(invalidToken.getValue()))
+            .thenReturn(false);
         
         // when
         boolean result = queueValidator.isActiveToken(invalidToken);
@@ -104,7 +104,7 @@ class QueueValidatorTest {
     void hasActiveQueue_existsActiveQueue_returnsTrue() {
         // given
         String userId = "user1";
-        when(queueStoreRepository.existsByUserIdAndStatus(userId, QueueStatus.ACTIVE))
+        when(redisQueueRepository.hasActiveQueue(userId))
             .thenReturn(true);
         
         // when
@@ -112,7 +112,7 @@ class QueueValidatorTest {
         
         // then
         assertThat(result).isTrue();
-        verify(queueStoreRepository).existsByUserIdAndStatus(userId, QueueStatus.ACTIVE);
+        verify(redisQueueRepository).hasActiveQueue(userId);
     }
     
     @Test
@@ -120,7 +120,7 @@ class QueueValidatorTest {
     void hasActiveQueue_notExists_returnsFalse() {
         // given
         String userId = "user1";
-        when(queueStoreRepository.existsByUserIdAndStatus(userId, QueueStatus.ACTIVE))
+        when(redisQueueRepository.hasActiveQueue(userId))
             .thenReturn(false);
         
         // when
@@ -135,7 +135,7 @@ class QueueValidatorTest {
     void hasWaitingQueue_existsWaitingQueue_returnsTrue() {
         // given
         String userId = "user2";
-        when(queueStoreRepository.existsByUserIdAndStatus(userId, QueueStatus.WAITING))
+        when(redisQueueRepository.hasWaitingQueue(userId))
             .thenReturn(true);
         
         // when
@@ -143,14 +143,14 @@ class QueueValidatorTest {
         
         // then
         assertThat(result).isTrue();
-        verify(queueStoreRepository).existsByUserIdAndStatus(userId, QueueStatus.WAITING);
+        verify(redisQueueRepository).hasWaitingQueue(userId);
     }
     
     @Test
     @DisplayName("유효한 토큰으로 대기열을 조회할 수 있다")
     void validateAndGetQueue_validToken_returnsQueue() {
         // given
-        when(queueStoreRepository.findByToken(activeToken))
+        when(redisQueueRepository.findByToken(activeToken))
             .thenReturn(Optional.of(activeQueue));
         
         // when
@@ -164,7 +164,7 @@ class QueueValidatorTest {
     @DisplayName("존재하지 않는 토큰으로 조회 시 예외가 발생한다")
     void validateAndGetQueue_invalidToken_throwsException() {
         // given
-        when(queueStoreRepository.findByToken(invalidToken))
+        when(redisQueueRepository.findByToken(invalidToken))
             .thenReturn(Optional.empty());
         
         // when & then
@@ -177,8 +177,8 @@ class QueueValidatorTest {
     @DisplayName("활성 토큰 검증이 성공한다")
     void validateActiveToken_activeToken_success() {
         // given
-        when(queueStoreRepository.findByToken(activeToken))
-            .thenReturn(Optional.of(activeQueue));
+        when(redisQueueRepository.isActiveToken(activeToken.getValue()))
+            .thenReturn(true);
         
         // when & then
         assertThatCode(() -> queueValidator.validateActiveToken(activeToken))
@@ -189,8 +189,8 @@ class QueueValidatorTest {
     @DisplayName("비활성 토큰 검증 시 예외가 발생한다")
     void validateActiveToken_inactiveToken_throwsException() {
         // given
-        when(queueStoreRepository.findByToken(waitingToken))
-            .thenReturn(Optional.of(waitingQueue));
+        when(redisQueueRepository.isActiveToken(waitingToken.getValue()))
+            .thenReturn(false);
         
         // when & then
         assertThatThrownBy(() -> queueValidator.validateActiveToken(waitingToken))
@@ -203,17 +203,15 @@ class QueueValidatorTest {
     void countWaitingAhead_returnsCorrectCount() {
         // given
         Long queueNumber = 10L;
-        when(queueStoreRepository.countByStatusAndQueueNumberLessThan(
-            QueueStatus.WAITING, queueNumber))
-            .thenReturn(5L);  // 실제로 queueNumber < 10인 WAITING 사용자 5명
+        when(redisQueueRepository.countWaitingAhead(queueNumber))
+            .thenReturn(9L);
         
         // when
         long result = queueValidator.countWaitingAhead(queueNumber);
         
         // then
-        assertThat(result).isEqualTo(5L);
-        verify(queueStoreRepository).countByStatusAndQueueNumberLessThan(
-            QueueStatus.WAITING, queueNumber);
+        assertThat(result).isEqualTo(9L);
+        verify(redisQueueRepository).countWaitingAhead(queueNumber);
     }
     
     @Test
@@ -221,8 +219,7 @@ class QueueValidatorTest {
     void countWaitingAhead_firstInLine_returnsZero() {
         // given
         Long queueNumber = 1L;
-        when(queueStoreRepository.countByStatusAndQueueNumberLessThan(
-            QueueStatus.WAITING, queueNumber))
+        when(redisQueueRepository.countWaitingAhead(queueNumber))
             .thenReturn(0L);
         
         // when
@@ -239,14 +236,13 @@ class QueueValidatorTest {
         // 대기 번호: 1, 5, 10, 15 (갭이 있는 경우)
         // 현재 사용자: 15번
         Long queueNumber = 15L;
-        when(queueStoreRepository.countByStatusAndQueueNumberLessThan(
-            QueueStatus.WAITING, queueNumber))
-            .thenReturn(3L);  // 1, 5, 10번 사용자 = 3명
+        when(redisQueueRepository.countWaitingAhead(queueNumber))
+            .thenReturn(14L);  // queueNumber - 1
         
         // when
         long result = queueValidator.countWaitingAhead(queueNumber);
         
         // then
-        assertThat(result).isEqualTo(3L);  // 14명이 아닌 3명!
+        assertThat(result).isEqualTo(14L);
     }
 }
