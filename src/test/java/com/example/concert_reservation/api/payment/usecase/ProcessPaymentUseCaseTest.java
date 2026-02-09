@@ -7,6 +7,11 @@ import com.example.concert_reservation.domain.payment.models.PaymentStatus;
 import com.example.concert_reservation.domain.reservation.models.Reservation;
 import com.example.concert_reservation.domain.reservation.models.ReservationStatus;
 import com.example.concert_reservation.domain.reservation.repositories.ReservationStoreRepository;
+import com.example.concert_reservation.domain.concert.models.Seat;
+import com.example.concert_reservation.domain.concert.models.SeatStatus;
+import com.example.concert_reservation.domain.concert.models.ConcertDate;
+import com.example.concert_reservation.domain.concert.repositories.SeatStoreRepository;
+import com.example.concert_reservation.domain.concert.repositories.ConcertReaderRepository;
 import com.example.concert_reservation.support.exception.DomainConflictException;
 import com.example.concert_reservation.support.exception.DomainForbiddenException;
 import com.example.concert_reservation.support.exception.DomainNotFoundException;
@@ -19,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -38,6 +44,12 @@ class ProcessPaymentUseCaseTest {
     @Mock
     private ReservationStoreRepository reservationRepository;
     
+    @Mock
+    private SeatStoreRepository seatRepository;
+    
+    @Mock
+    private ConcertReaderRepository concertRepository;
+    
     @InjectMocks
     private ProcessPaymentUseCase processPaymentUseCase;
     
@@ -46,6 +58,8 @@ class ProcessPaymentUseCaseTest {
     void execute_success() {
         // given
         Long reservationId = 1L;
+        Long seatId = 1L;
+        Long concertDateId = 10L;
         String userId = "user123";
         BigDecimal amount = new BigDecimal("50000");
         
@@ -56,16 +70,28 @@ class ProcessPaymentUseCaseTest {
         );
         
         Reservation mockReservation = Reservation.of(
-            reservationId, userId, 1L, 10L,
+            reservationId, userId, seatId, concertDateId,
             amount,  // price
             ReservationStatus.CONFIRMED,
             LocalDateTime.now(), LocalDateTime.now().plusMinutes(5)
+        );
+        
+        Seat mockSeat = Seat.of(
+            seatId, concertDateId, 42, SeatStatus.SOLD, amount
+        );
+        
+        ConcertDate mockConcertDate = ConcertDate.of(
+            concertDateId, "BTS Concert", LocalDate.now(), 100, 50
         );
         
         given(paymentProcessor.processPayment(reservationId, userId))
             .willReturn(expectedPayment);
         given(reservationRepository.findById(reservationId))
             .willReturn(Optional.of(mockReservation));
+        given(seatRepository.findByIdWithLock(seatId))
+            .willReturn(Optional.of(mockSeat));
+        given(concertRepository.findById(concertDateId))
+            .willReturn(Optional.of(mockConcertDate));
         
         // when
         PaymentResponse response = processPaymentUseCase.execute(reservationId, userId);
@@ -80,6 +106,8 @@ class ProcessPaymentUseCaseTest {
         
         verify(paymentProcessor).processPayment(reservationId, userId);
         verify(reservationRepository).findById(reservationId);
+        verify(seatRepository).findByIdWithLock(seatId);
+        verify(concertRepository).findById(concertDateId);
         // eventPublisher는 단위 테스트에서 검증 제외 (통합 테스트에서 검증)
     }
     
