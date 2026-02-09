@@ -34,6 +34,13 @@ public interface SeatStoreRepository {
     Optional<Seat> findByConcertDateIdAndSeatNumber(Long concertDateId, Integer seatNumber);
     
     /**
+     * ID로 좌석 조회 (락 없음)
+     * @param id 좌석 ID
+     * @return 좌석 Optional
+     */
+    Optional<Seat> findById(Long id);
+    
+    /**
      * ID로 좌석 조회 (비관적 락 적용)
      * @param id 좌석 ID
      * @return 좌석 Optional

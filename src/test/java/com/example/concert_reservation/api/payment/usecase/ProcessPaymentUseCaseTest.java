@@ -88,7 +88,7 @@ class ProcessPaymentUseCaseTest {
             .willReturn(expectedPayment);
         given(reservationRepository.findById(reservationId))
             .willReturn(Optional.of(mockReservation));
-        given(seatRepository.findByIdWithLock(seatId))
+        given(seatRepository.findById(seatId))
             .willReturn(Optional.of(mockSeat));
         given(concertRepository.findById(concertDateId))
             .willReturn(Optional.of(mockConcertDate));
@@ -106,7 +106,7 @@ class ProcessPaymentUseCaseTest {
         
         verify(paymentProcessor).processPayment(reservationId, userId);
         verify(reservationRepository).findById(reservationId);
-        verify(seatRepository).findByIdWithLock(seatId);
+        verify(seatRepository).findById(seatId);
         verify(concertRepository).findById(concertDateId);
         // eventPublisher는 단위 테스트에서 검증 제외 (통합 테스트에서 검증)
     }

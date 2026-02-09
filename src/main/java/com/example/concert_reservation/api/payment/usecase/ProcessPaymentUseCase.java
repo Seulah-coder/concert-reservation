@@ -97,9 +97,9 @@ public class ProcessPaymentUseCase {
                 "예약을 찾을 수 없습니다. reservationId=" + payment.getReservationId()
             ));
         
-        // 좌석 정보 조회
+        // 좌석 정보 조회 (읽기 전용, 락 불필요)
         Seat seat = seatRepository
-            .findByIdWithLock(reservation.getSeatId())
+            .findById(reservation.getSeatId())
             .orElseThrow(() -> new DomainNotFoundException(
                 "좌석을 찾을 수 없습니다. seatId=" + reservation.getSeatId()
             ));
