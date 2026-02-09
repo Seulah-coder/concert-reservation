@@ -9,11 +9,15 @@ import java.math.BigDecimal;
  * 환불 JPA 엔티티
  */
 @Entity
-@Table(name = "refunds", indexes = {
-    @Index(name = "idx_refund_payment_id", columnList = "payment_id"),
-    @Index(name = "idx_refund_reservation_id", columnList = "reservation_id"),
-    @Index(name = "idx_refund_user_id", columnList = "user_id")
-})
+@Table(name = "refunds", 
+    uniqueConstraints = {
+        @UniqueConstraint(name = "uk_refund_payment_id", columnNames = "payment_id")
+    },
+    indexes = {
+        @Index(name = "idx_refund_payment_id", columnList = "payment_id"),
+        @Index(name = "idx_refund_reservation_id", columnList = "reservation_id"),
+        @Index(name = "idx_refund_user_id", columnList = "user_id")
+    })
 public class RefundEntity extends BaseEntity {
 
     @Id

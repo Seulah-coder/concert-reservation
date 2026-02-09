@@ -57,8 +57,8 @@ public class RefundProcessor {
     public Refund processRefund(Long paymentId, String userId, String reason) {
         log.info("환불 처리 시작 - paymentId: {}, userId: {}, reason: {}", paymentId, userId, reason);
         
-        // 1. 결제 정보 조회
-        Payment payment = paymentRepository.findById(paymentId)
+        // 1. 결제 정보 조회 (비관적 락으로 동시 환불 요청 차단)
+        Payment payment = paymentRepository.findByIdWithLock(paymentId)
             .orElseThrow(() -> new DomainNotFoundException("결제를 찾을 수 없습니다: " + paymentId));
 
         // 2. 결제자 본인 확인
