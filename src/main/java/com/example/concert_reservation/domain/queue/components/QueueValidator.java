@@ -70,11 +70,11 @@ public class QueueValidator {
     }
     
     /**
-     * 대기열 앞에 있는 사람 수 조회
-     * @param queueNumber 조회할 대기 번호
+     * 대기열 앞에 있는 사람 수 조회 (ZSET ZRANK 기반)
+     * @param tokenValue 조회할 토큰 값
      * @return 앞에 대기 중인 사람 수
      */
-    public long countWaitingAhead(Long queueNumber) {
-        return redisQueueRepository.countWaitingAhead(queueNumber);
+    public long countWaitingAheadByToken(String tokenValue) {
+        return redisQueueRepository.countWaitingAheadByToken(tokenValue);
     }
 }

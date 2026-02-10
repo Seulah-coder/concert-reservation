@@ -276,18 +276,14 @@ public class RedisQueueRepository {
     }
     
     /**
-     * 앞에 대기 중인 인원 수 계산
-     * Sorted Set에서 현재 토큰보다 score가 낮은(먼저 들어온) 토큰의 수
-     */
-    public long countWaitingAhead(Long queueNumber) {
-        // Redis Sorted Set의 rank는 0-based이므로
-        // rank 자체가 앞에 있는 사람의 수와 동일
-        // queueNumber는 1-based이므로 -1
-        return Math.max(0, queueNumber - 1);
-    }
-    
-    /**
-     * 토큰으로 앞에 대기 중인 인원 수 계산 (정확한 방법)
+     * 앞에 대기 중인 인원 수 계산 (ZSET ZRANK 기반)
+     * 
+     * Sorted Set의 ZRANK는 0-based → rank 자체가 앞에 있는 사람 수와 동일.
+     * 중간 토큰이 활성화/만료되어 제거되면 rank가 자동으로 갱신되므로
+     * 항상 정확한 대기 인원을 반환한다.
+     * 
+     * @param tokenValue 조회할 토큰 값
+     * @return 앞에 대기 중인 인원 수 (0-based rank)
      */
     public long countWaitingAheadByToken(String tokenValue) {
         Long rank = redisTemplate.opsForZSet().rank(WAITING_KEY, tokenValue);

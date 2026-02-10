@@ -199,50 +199,50 @@ class QueueValidatorTest {
     }
     
     @Test
-    @DisplayName("대기 번호로 앞에 대기 중인 인원을 계산할 수 있다")
-    void countWaitingAhead_returnsCorrectCount() {
+    @DisplayName("토큰으로 앞에 대기 중인 인원을 계산할 수 있다 (ZRANK 기반)")
+    void countWaitingAheadByToken_returnsCorrectCount() {
         // given
-        Long queueNumber = 10L;
-        when(redisQueueRepository.countWaitingAhead(queueNumber))
+        String tokenValue = "test-token-abc";
+        when(redisQueueRepository.countWaitingAheadByToken(tokenValue))
             .thenReturn(9L);
         
         // when
-        long result = queueValidator.countWaitingAhead(queueNumber);
+        long result = queueValidator.countWaitingAheadByToken(tokenValue);
         
         // then
         assertThat(result).isEqualTo(9L);
-        verify(redisQueueRepository).countWaitingAhead(queueNumber);
+        verify(redisQueueRepository).countWaitingAheadByToken(tokenValue);
     }
     
     @Test
-    @DisplayName("대기 번호가 1이면 앞에 대기자가 0명이다")
-    void countWaitingAhead_firstInLine_returnsZero() {
+    @DisplayName("첫 번째 대기자의 토큰은 앞에 대기자가 0명이다 (ZRANK=0)")
+    void countWaitingAheadByToken_firstInLine_returnsZero() {
         // given
-        Long queueNumber = 1L;
-        when(redisQueueRepository.countWaitingAhead(queueNumber))
+        String tokenValue = "first-token";
+        when(redisQueueRepository.countWaitingAheadByToken(tokenValue))
             .thenReturn(0L);
         
         // when
-        long result = queueValidator.countWaitingAhead(queueNumber);
+        long result = queueValidator.countWaitingAheadByToken(tokenValue);
         
         // then
         assertThat(result).isEqualTo(0L);
     }
     
     @Test
-    @DisplayName("대기 번호에 갭이 있어도 정확한 대기 인원을 계산한다")
-    void countWaitingAhead_withGapsInQueueNumbers_returnsCorrectCount() {
+    @DisplayName("중간 토큰이 제거되어도 ZRANK로 정확한 대기 인원을 계산한다")
+    void countWaitingAheadByToken_withGaps_returnsCorrectRank() {
         // given
-        // 대기 번호: 1, 5, 10, 15 (갭이 있는 경우)
-        // 현재 사용자: 15번
-        Long queueNumber = 15L;
-        when(redisQueueRepository.countWaitingAhead(queueNumber))
-            .thenReturn(14L);  // queueNumber - 1
+        // 원래 5명(rank 0~4)이 있었으나 중간 2명이 활성화되어 제거됨
+        // → 현재 사용자가 실제로는 3번째(rank 2)에 위치
+        String tokenValue = "token-after-gaps";
+        when(redisQueueRepository.countWaitingAheadByToken(tokenValue))
+            .thenReturn(2L);  // ZRANK = 2 → 앞에 2명
         
         // when
-        long result = queueValidator.countWaitingAhead(queueNumber);
+        long result = queueValidator.countWaitingAheadByToken(tokenValue);
         
         // then
-        assertThat(result).isEqualTo(14L);
+        assertThat(result).isEqualTo(2L);
     }
 }
