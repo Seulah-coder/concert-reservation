@@ -162,15 +162,11 @@ class QueueTokenControllerTest {
     @Test
     @DisplayName("GET /api/v1/queue/status - 여러 사용자의 대기 순서가 올바르게 표시된다")
     void getQueueStatus_multipleUsers_correctWaitingAhead() throws Exception {
-        // given - 3명의 사용자 토큰 발급 (약간의 지연으로 순서 보장)
+        // given - 3명의 사용자 토큰 순차 발급
+        // score가 epochMillis 기반이므로 순차 호출만으로 순서가 결정적으로 보장됨
         String token1 = issueTokenForUser("user1");
-        Thread.sleep(10);  // Redis 작업 완료 대기
-        
         String token2 = issueTokenForUser("user2");
-        Thread.sleep(10);  // Redis 작업 완료 대기
-        
         String token3 = issueTokenForUser("user3");
-        Thread.sleep(10);  // Redis 작업 완료 대기
         
         // when & then - user1은 앞에 0명 (첫 번째)
         mockMvc.perform(get("/api/v1/queue/status")

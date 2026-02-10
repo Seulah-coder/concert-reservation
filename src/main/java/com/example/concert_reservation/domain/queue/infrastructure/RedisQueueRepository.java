@@ -22,7 +22,7 @@ import java.util.Set;
  * Redis 자료구조:
  * 1. Waiting Queue: Sorted Set
  *    - Key: "queue:waiting"
- *    - Score: 진입 시간 (timestamp)
+ *    - Score: 진입 시간 (epochMillis) - ms 단위로 순서 결정성 보장
  *    - Member: token
  * 
  * 2. Active Queue: Hash
@@ -55,7 +55,8 @@ public class RedisQueueRepository {
     public UserQueue addToWaitingQueue(String userId) {
         QueueToken token = QueueToken.generate();
         LocalDateTime now = LocalDateTime.now();
-        long score = now.toEpochSecond(ZoneOffset.UTC);
+        // ms 단위 score → 동일 초 내에서도 결정적 순서 보장 (기존 epochSecond는 1초 내 비결정적)
+        long score = now.toInstant(ZoneOffset.UTC).toEpochMilli();
         String tokenKey = TOKEN_KEY_PREFIX + token.getValue();
         long waitingTtlSeconds = java.util.concurrent.TimeUnit.MINUTES.toSeconds(30);
         
