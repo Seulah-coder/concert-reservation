@@ -46,7 +46,7 @@ class GetQueueStatusUseCaseTest {
     void execute_waitingQueue_includesWaitingAhead() {
         // given
         when(queueValidator.validateAndGetQueue(any(QueueToken.class))).thenReturn(waitingQueue);
-        when(queueValidator.countWaitingAhead(5L)).thenReturn(3L);
+        when(queueValidator.countWaitingAhead(waitingQueue.getToken())).thenReturn(3L);
         
         // when
         QueueStatusResponse response = useCase.execute(token.getValue());
@@ -62,7 +62,7 @@ class GetQueueStatusUseCaseTest {
         assertThat(response.getExpiredAt()).isNull();
         
         verify(queueValidator).validateAndGetQueue(any(QueueToken.class));
-        verify(queueValidator).countWaitingAhead(5L);
+        verify(queueValidator).countWaitingAhead(waitingQueue.getToken());
     }
     
     @Test
@@ -81,7 +81,7 @@ class GetQueueStatusUseCaseTest {
         assertThat(response.getExpiredAt()).isNotNull();
         
         verify(queueValidator).validateAndGetQueue(any(QueueToken.class));
-        verify(queueValidator, never()).countWaitingAhead(anyLong());
+        verify(queueValidator, never()).countWaitingAhead(any(QueueToken.class));
     }
     
     @Test
@@ -124,7 +124,7 @@ class GetQueueStatusUseCaseTest {
         // given
         UserQueue firstQueue = UserQueue.create("user111", 1L);
         when(queueValidator.validateAndGetQueue(any(QueueToken.class))).thenReturn(firstQueue);
-        when(queueValidator.countWaitingAhead(1L)).thenReturn(0L);
+        when(queueValidator.countWaitingAhead(firstQueue.getToken())).thenReturn(0L);
         
         // when
         QueueStatusResponse response = useCase.execute(token.getValue());

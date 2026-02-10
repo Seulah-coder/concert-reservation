@@ -199,31 +199,31 @@ class QueueValidatorTest {
     }
     
     @Test
-    @DisplayName("대기 번호로 앞에 대기 중인 인원을 계산할 수 있다")
+    @DisplayName("대기 토큰으로 앞에 대기 중인 인원을 계산할 수 있다")
     void countWaitingAhead_returnsCorrectCount() {
         // given
-        Long queueNumber = 10L;
-        when(redisQueueRepository.countWaitingAhead(queueNumber))
+        QueueToken token = QueueToken.generate();
+        when(redisQueueRepository.countWaitingAhead(token.getValue()))
             .thenReturn(9L);
         
         // when
-        long result = queueValidator.countWaitingAhead(queueNumber);
+        long result = queueValidator.countWaitingAhead(token);
         
         // then
         assertThat(result).isEqualTo(9L);
-        verify(redisQueueRepository).countWaitingAhead(queueNumber);
+        verify(redisQueueRepository).countWaitingAhead(token.getValue());
     }
     
     @Test
-    @DisplayName("대기 번호가 1이면 앞에 대기자가 0명이다")
+    @DisplayName("첫 번째 대기자는 앞에 대기자가 0명이다")
     void countWaitingAhead_firstInLine_returnsZero() {
         // given
-        Long queueNumber = 1L;
-        when(redisQueueRepository.countWaitingAhead(queueNumber))
+        QueueToken token = QueueToken.generate();
+        when(redisQueueRepository.countWaitingAhead(token.getValue()))
             .thenReturn(0L);
         
         // when
-        long result = queueValidator.countWaitingAhead(queueNumber);
+        long result = queueValidator.countWaitingAhead(token);
         
         // then
         assertThat(result).isEqualTo(0L);
@@ -233,16 +233,17 @@ class QueueValidatorTest {
     @DisplayName("대기 번호에 갭이 있어도 정확한 대기 인원을 계산한다")
     void countWaitingAhead_withGapsInQueueNumbers_returnsCorrectCount() {
         // given
-        // 대기 번호: 1, 5, 10, 15 (갭이 있는 경우)
-        // 현재 사용자: 15번
-        Long queueNumber = 15L;
-        when(redisQueueRepository.countWaitingAhead(queueNumber))
-            .thenReturn(14L);  // queueNumber - 1
+        // 대기열에 실제로 4명만 있는 경우: 1, 5, 10, 15번
+        // 15번 토큰의 ZSET rank는 3 (0-based index)
+        // 따라서 앞에 3명이 대기 중
+        QueueToken token = QueueToken.generate();
+        when(redisQueueRepository.countWaitingAhead(token.getValue()))
+            .thenReturn(3L);  // ZSET rank 기반 - 실제로 앞에 3명
         
         // when
-        long result = queueValidator.countWaitingAhead(queueNumber);
+        long result = queueValidator.countWaitingAhead(token);
         
         // then
-        assertThat(result).isEqualTo(14L);
+        assertThat(result).isEqualTo(3L);  // 갭을 무시하고 실제 대기 인원만 계산
     }
 }

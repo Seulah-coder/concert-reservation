@@ -44,7 +44,7 @@ public class GetQueueStatusUseCase {
         String estimatedWaitTime = "0분 0초";
         
         if (queue.isWaiting()) {
-            waitingAhead = queueValidator.countWaitingAhead(queue.getQueueNumber());
+            waitingAhead = queueValidator.countWaitingAhead(queue.getToken());
             estimatedWaitTime = QueueActivationScheduler.getEstimatedWaitTimeString(queue.getQueueNumber());
         }
         
