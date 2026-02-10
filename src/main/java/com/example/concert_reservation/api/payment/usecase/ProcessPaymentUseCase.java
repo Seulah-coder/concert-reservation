@@ -6,6 +6,11 @@ import com.example.concert_reservation.domain.payment.events.PaymentCompletedEve
 import com.example.concert_reservation.domain.payment.models.Payment;
 import com.example.concert_reservation.domain.reservation.models.Reservation;
 import com.example.concert_reservation.domain.reservation.repositories.ReservationStoreRepository;
+import com.example.concert_reservation.domain.concert.models.Seat;
+import com.example.concert_reservation.domain.concert.models.ConcertDate;
+import com.example.concert_reservation.domain.concert.repositories.SeatStoreRepository;
+import com.example.concert_reservation.domain.concert.repositories.ConcertReaderRepository;
+import com.example.concert_reservation.support.exception.DomainNotFoundException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,15 +36,21 @@ public class ProcessPaymentUseCase {
     
     private final PaymentProcessor paymentProcessor;
     private final ReservationStoreRepository reservationRepository;
+    private final SeatStoreRepository seatRepository;
+    private final ConcertReaderRepository concertRepository;
     private final ApplicationEventPublisher eventPublisher;
     
     public ProcessPaymentUseCase(
         PaymentProcessor paymentProcessor,
         ReservationStoreRepository reservationRepository,
+        SeatStoreRepository seatRepository,
+        ConcertReaderRepository concertRepository,
         ApplicationEventPublisher eventPublisher
     ) {
         this.paymentProcessor = paymentProcessor;
         this.reservationRepository = reservationRepository;
+        this.seatRepository = seatRepository;
+        this.concertRepository = concertRepository;
         this.eventPublisher = eventPublisher;
     }
     
@@ -82,7 +93,23 @@ public class ProcessPaymentUseCase {
         // 예약 정보 조회 (읽기 전용, 트랜잭션 내)
         Reservation reservation = reservationRepository
             .findById(payment.getReservationId())
-            .orElseThrow();
+            .orElseThrow(() -> new DomainNotFoundException(
+                "예약을 찾을 수 없습니다. reservationId=" + payment.getReservationId()
+            ));
+        
+        // 좌석 정보 조회 (읽기 전용, 락 불필요)
+        Seat seat = seatRepository
+            .findById(reservation.getSeatId())
+            .orElseThrow(() -> new DomainNotFoundException(
+                "좌석을 찾을 수 없습니다. seatId=" + reservation.getSeatId()
+            ));
+        
+        // 콘서트 정보 조회
+        ConcertDate concertDate = concertRepository
+            .findById(reservation.getConcertDateId())
+            .orElseThrow(() -> new DomainNotFoundException(
+                "콘서트 정보를 찾을 수 없습니다. concertDateId=" + reservation.getConcertDateId()
+            ));
         
         // 이벤트 생성
         PaymentCompletedEvent event = PaymentCompletedEvent.of(
@@ -91,8 +118,8 @@ public class ProcessPaymentUseCase {
             payment.getUserId(),
             payment.getAmount(),
             payment.getPaidAt(),
-            "Concert Title",  // TODO: Concert 정보 추가
-            "Seat Info"       // TODO: Seat 정보 추가
+            concertDate.getConcertName(),
+            String.valueOf(seat.getSeatNumber())
         );
         
         // Spring Events로 발행 (나중에 Kafka로 교체)
