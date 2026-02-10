@@ -28,6 +28,12 @@ public class PaymentStoreRepository implements PaymentRepository {
         return paymentJpaRepository.findById(id)
             .map(PaymentEntity::toDomain);
     }
+
+    @Override
+    public Optional<Payment> findByIdWithLock(Long id) {
+        return paymentJpaRepository.findByIdWithLock(id)
+            .map(PaymentEntity::toDomain);
+    }
     
     @Override
     public Optional<Payment> findByReservationId(Long reservationId) {

@@ -44,6 +44,12 @@ public class SeatCoreStoreRepository implements SeatStoreRepository {
     }
     
     @Override
+    public Optional<Seat> findById(Long id) {
+        return seatJpaRepository.findById(id)
+            .map(this::toDomain);
+    }
+    
+    @Override
     public Optional<Seat> findByIdWithLock(Long id) {
         return seatJpaRepository.findByIdWithLock(id)
             .map(this::toDomain);
