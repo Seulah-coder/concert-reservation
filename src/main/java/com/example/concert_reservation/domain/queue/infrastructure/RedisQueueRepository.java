@@ -43,6 +43,10 @@ public class RedisQueueRepository {
     private static final String USER_ACTIVE_KEY_PREFIX = "user:active:";
     private static final String USER_WAITING_KEY_PREFIX = "user:waiting:";
     private static final String ACTIVE_COUNT_KEY = "queue:active:count";
+    private static final String WAITING_QUEUE_ENQUEUE_SCRIPT =
+        "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end "
+            + "redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) "
+            + "return 1";
     
     private final RedisTemplate<String, String> redisTemplate;
     
@@ -62,11 +66,8 @@ public class RedisQueueRepository {
         String tokenKey = TOKEN_KEY_PREFIX + token.getValue();
         long waitingTtlSeconds = java.util.concurrent.TimeUnit.MINUTES.toSeconds(30);
         String userWaitingKey = USER_WAITING_KEY_PREFIX + userId;
-        String luaScript = "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end "
-            + "redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) "
-            + "return 1";
         Long result = redisTemplate.execute(
-            new DefaultRedisScript<>(luaScript, Long.class),
+            new DefaultRedisScript<>(WAITING_QUEUE_ENQUEUE_SCRIPT, Long.class),
             List.of(userWaitingKey),
             token.getValue(),
             String.valueOf(waitingTtlSeconds)
@@ -236,11 +237,6 @@ public class RedisQueueRepository {
         long queueNumber = 0;
         if (status == QueueStatus.WAITING) {
             queueNumber = countWaitingAheadByToken(token.getValue()) + 1;
-        } else {
-            String queueNumberStr = (String) entries.get("queueNumber");
-            if (queueNumberStr != null) {
-                queueNumber = Long.parseLong(queueNumberStr);
-            }
         }
         
         // UserQueue 재구성 (기존 token 사용)
@@ -369,8 +365,10 @@ public class RedisQueueRepository {
                 return null;
             });
         
-        if (Boolean.TRUE.equals(redisTemplate.hasKey(ACTIVE_COUNT_KEY))) {
-            redisTemplate.opsForValue().increment(ACTIVE_COUNT_KEY, -expiredTokens.size());
+        Long updatedCount = redisTemplate.opsForValue()
+            .increment(ACTIVE_COUNT_KEY, -expiredTokens.size());
+        if (updatedCount != null && updatedCount < 0) {
+            redisTemplate.opsForValue().set(ACTIVE_COUNT_KEY, "0");
         }
         
         return expiredTokens.size();
@@ -400,8 +398,11 @@ public class RedisQueueRepository {
                 return null;
             });
         
-        if (wasActive && Boolean.TRUE.equals(redisTemplate.hasKey(ACTIVE_COUNT_KEY))) {
-            redisTemplate.opsForValue().decrement(ACTIVE_COUNT_KEY);
+        if (wasActive) {
+            Long updatedCount = redisTemplate.opsForValue().increment(ACTIVE_COUNT_KEY, -1);
+            if (updatedCount != null && updatedCount < 0) {
+                redisTemplate.opsForValue().set(ACTIVE_COUNT_KEY, "0");
+            }
         }
     }
 }
