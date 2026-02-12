@@ -6,6 +6,7 @@ import com.example.concert_reservation.domain.queue.models.UserQueue;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ScanOptions;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -27,11 +28,11 @@ import java.util.Set;
  * 
  * 2. Active Queue: Hash
  *    - Key: "queue:active:{token}"
- *    - Fields: userId, enteredAt, expiredAt, queueNumber
+ *    - Fields: userId, enteredAt, expiredAt
  * 
  * 3. Token Metadata: Hash
  *    - Key: "queue:token:{token}"
- *    - Fields: userId, status, enteredAt, expiredAt, queueNumber
+ *    - Fields: userId, status, enteredAt, expiredAt
  */
 @Repository
 public class RedisQueueRepository {
@@ -41,6 +42,24 @@ public class RedisQueueRepository {
     private static final String TOKEN_KEY_PREFIX = "queue:token:";
     private static final String USER_ACTIVE_KEY_PREFIX = "user:active:";
     private static final String USER_WAITING_KEY_PREFIX = "user:waiting:";
+    private static final String ACTIVE_COUNT_KEY = "queue:active:count";
+    private static final DefaultRedisScript<Long> WAITING_QUEUE_ENQUEUE_SCRIPT =
+        new DefaultRedisScript<>(
+            "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end "
+                + "redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) "
+                + "return 1",
+            Long.class
+        );
+    private static final DefaultRedisScript<Long> ACTIVE_COUNT_DECREMENT_SCRIPT =
+        new DefaultRedisScript<>(
+            "local value = redis.call('INCRBY', KEYS[1], ARGV[1]) "
+                + "if value < 0 then "
+                + "redis.call('SET', KEYS[1], 0) "
+                + "return 0 "
+                + "end "
+                + "return value",
+            Long.class
+        );
     
     private final RedisTemplate<String, String> redisTemplate;
     
@@ -59,6 +78,16 @@ public class RedisQueueRepository {
         long score = now.toInstant(ZoneOffset.UTC).toEpochMilli();
         String tokenKey = TOKEN_KEY_PREFIX + token.getValue();
         long waitingTtlSeconds = java.util.concurrent.TimeUnit.MINUTES.toSeconds(30);
+        String userWaitingKey = USER_WAITING_KEY_PREFIX + userId;
+        Long result = redisTemplate.execute(
+            WAITING_QUEUE_ENQUEUE_SCRIPT,
+            List.of(userWaitingKey),
+            token.getValue(),
+            String.valueOf(waitingTtlSeconds)
+        );
+        if (result == null || result == 0L) {
+            throw new IllegalStateException("이미 대기 중인 토큰이 존재합니다");
+        }
         
         // Pipeline으로 모든 명령 원자적 실행
         redisTemplate.executePipelined((org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
@@ -77,16 +106,7 @@ public class RedisQueueRepository {
         });
         
         // 대기 번호 계산 (Pipeline 외부에서 계산)
-        long queueNumber = getWaitingPosition(token.getValue()) + 1;
-        redisTemplate.opsForHash().put(tokenKey, "queueNumber", String.valueOf(queueNumber));
-        
-        // userId → token 역매핑 (TTL 30분 설정으로 메모리 누수 방지)
-        redisTemplate.opsForValue().set(
-            USER_WAITING_KEY_PREFIX + userId, 
-            token.getValue(),
-            30,  // 30분 후 자동 삭제 (Active 5분 + 버퍼)
-            java.util.concurrent.TimeUnit.MINUTES
-        );
+        long queueNumber = calculateQueueNumber(token.getValue());
         
         // UserQueue 객체 생성
         return UserQueue.of(
@@ -117,25 +137,11 @@ public class RedisQueueRepository {
     }
     
     /**
-     * Active Queue 크기 조회
-     * SCAN 사용 (KEYS 대신 - 프로덕션 안전, 비블로킹)
+     * Active Queue 크기 조회 (카운터 기반)
      */
     public long getActiveQueueSize() {
-        Long count = redisTemplate.execute(
-            (org.springframework.data.redis.core.RedisCallback<Long>) connection -> {
-                long c = 0;
-                Cursor<byte[]> cursor = connection.scan(
-                    ScanOptions.scanOptions()
-                        .match(ACTIVE_KEY_PREFIX + "*")
-                        .count(100)
-                        .build());
-                while (cursor.hasNext()) {
-                    cursor.next();
-                    c++;
-                }
-                return c;
-            });
-        return count != null ? count : 0;
+        String count = redisTemplate.opsForValue().get(ACTIVE_COUNT_KEY);
+        return count != null ? Long.parseLong(count) : 0;
     }
     
     /**
@@ -153,6 +159,7 @@ public class RedisQueueRepository {
         List<String> activatedTokens = new ArrayList<>();
         List<String> userIds = new ArrayList<>();
         List<String> tokenKeys = new ArrayList<>();
+        List<String> zombieTokens = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expiredAt = now.plusMinutes(5); // 5분 후 만료
         long ttlSeconds = java.util.concurrent.TimeUnit.MINUTES.toSeconds(5);
@@ -162,11 +169,18 @@ public class RedisQueueRepository {
             String tokenKey = TOKEN_KEY_PREFIX + token;
             String userId = (String) redisTemplate.opsForHash().get(tokenKey, "userId");
             
-            if (userId != null) {
-                activatedTokens.add(token);
-                userIds.add(userId);
-                tokenKeys.add(tokenKey);
+            if (userId == null) {
+                zombieTokens.add(token);
+                continue;
             }
+            
+            activatedTokens.add(token);
+            userIds.add(userId);
+            tokenKeys.add(tokenKey);
+        }
+        
+        if (!zombieTokens.isEmpty()) {
+            redisTemplate.opsForZSet().remove(WAITING_KEY, zombieTokens.toArray());
         }
 
         if (activatedTokens.isEmpty()) {
@@ -208,6 +222,10 @@ public class RedisQueueRepository {
             return null;
         });
         
+        if (!activatedTokens.isEmpty()) {
+            redisTemplate.opsForValue().increment(ACTIVE_COUNT_KEY, activatedTokens.size());
+        }
+        
         return activatedTokens;
     }
     
@@ -231,19 +249,20 @@ public class RedisQueueRepository {
         String statusStr = (String) entries.get("status");
         String enteredAtStr = (String) entries.get("enteredAt");
         String expiredAtStr = (String) entries.get("expiredAt");
-        String queueNumberStr = (String) entries.get("queueNumber");
-        
         QueueStatus status = QueueStatus.valueOf(statusStr);
         LocalDateTime enteredAt = LocalDateTime.parse(enteredAtStr);
         LocalDateTime expiredAt = expiredAtStr != null ? LocalDateTime.parse(expiredAtStr) : null;
-        Long queueNumber = queueNumberStr != null ? Long.parseLong(queueNumberStr) : null;
+        long queueNumber = 0;
+        if (status == QueueStatus.WAITING) {
+            queueNumber = calculateQueueNumber(token.getValue());
+        }
         
         // UserQueue 재구성 (기존 token 사용)
         return Optional.of(UserQueue.of(
             null,  // Redis는 ID 미사용
             token,  // 기존 token 사용 (중요!)
             userId,
-            queueNumber != null ? queueNumber : 0L,
+            queueNumber,
             status,
             enteredAt,
             expiredAt
@@ -290,6 +309,10 @@ public class RedisQueueRepository {
         Long rank = redisTemplate.opsForZSet().rank(WAITING_KEY, tokenValue);
         return rank != null ? rank : 0;
     }
+
+    private long calculateQueueNumber(String tokenValue) {
+        return countWaitingAheadByToken(tokenValue) + 1;
+    }
     
     /**
      * 만료된 Active 토큰 제거
@@ -316,21 +339,31 @@ public class RedisQueueRepository {
             return 0;
         }
         
+        List<Object> activeEntries = redisTemplate.executePipelined(
+            (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+                for (String key : activeKeys) {
+                    byte[] keyBytes = key.getBytes();
+                    connection.hGet(keyBytes, "expiredAt".getBytes());
+                    connection.hGet(keyBytes, "userId".getBytes());
+                }
+                return null;
+            });
+        
         // 만료된 토큰 필터링
         List<String> expiredTokens = new ArrayList<>();
         List<String> expiredUserIds = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         
-        for (String key : activeKeys) {
-            String expiredAtStr = (String) redisTemplate.opsForHash().get(key, "expiredAt");
+        for (int i = 0; i < activeKeys.size(); i++) {
+            String key = activeKeys.get(i);
+            int baseIndex = i * 2;
+            String expiredAtStr = (String) activeEntries.get(baseIndex);
+            String userId = (String) activeEntries.get(baseIndex + 1);
             if (expiredAtStr != null) {
                 LocalDateTime expiredAt = LocalDateTime.parse(expiredAtStr);
                 if (now.isAfter(expiredAt)) {
                     String token = key.replace(ACTIVE_KEY_PREFIX, "");
                     expiredTokens.add(token);
-                    
-                    String tokenKey = TOKEN_KEY_PREFIX + token;
-                    String userId = (String) redisTemplate.opsForHash().get(tokenKey, "userId");
                     if (userId != null) {
                         expiredUserIds.add(userId);
                     }
@@ -355,6 +388,12 @@ public class RedisQueueRepository {
                 return null;
             });
         
+        redisTemplate.execute(
+            ACTIVE_COUNT_DECREMENT_SCRIPT,
+            List.of(ACTIVE_COUNT_KEY),
+            String.valueOf(-expiredTokens.size())
+        );
+        
         return expiredTokens.size();
     }
     
@@ -366,6 +405,7 @@ public class RedisQueueRepository {
         // Token에서 userId 조회 (Pipeline 외부 - 조건부 삭제에 필요)
         String tokenKey = TOKEN_KEY_PREFIX + token;
         String userId = (String) redisTemplate.opsForHash().get(tokenKey, "userId");
+        boolean wasActive = Boolean.TRUE.equals(redisTemplate.hasKey(ACTIVE_KEY_PREFIX + token));
         
         // Pipeline으로 관련 키 일괄 삭제
         redisTemplate.executePipelined(
@@ -380,5 +420,13 @@ public class RedisQueueRepository {
                 }
                 return null;
             });
+        
+        if (wasActive) {
+            redisTemplate.execute(
+                ACTIVE_COUNT_DECREMENT_SCRIPT,
+                List.of(ACTIVE_COUNT_KEY),
+                "-1"
+            );
+        }
     }
 }
