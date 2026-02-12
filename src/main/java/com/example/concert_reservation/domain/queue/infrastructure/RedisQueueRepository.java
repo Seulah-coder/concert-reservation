@@ -43,10 +43,23 @@ public class RedisQueueRepository {
     private static final String USER_ACTIVE_KEY_PREFIX = "user:active:";
     private static final String USER_WAITING_KEY_PREFIX = "user:waiting:";
     private static final String ACTIVE_COUNT_KEY = "queue:active:count";
-    private static final String WAITING_QUEUE_ENQUEUE_SCRIPT =
-        "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end "
-            + "redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) "
-            + "return 1";
+    private static final DefaultRedisScript<Long> WAITING_QUEUE_ENQUEUE_SCRIPT =
+        new DefaultRedisScript<>(
+            "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end "
+                + "redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) "
+                + "return 1",
+            Long.class
+        );
+    private static final DefaultRedisScript<Long> ACTIVE_COUNT_DECREMENT_SCRIPT =
+        new DefaultRedisScript<>(
+            "local value = redis.call('INCRBY', KEYS[1], ARGV[1]) "
+                + "if value < 0 then "
+                + "redis.call('SET', KEYS[1], 0) "
+                + "return 0 "
+                + "end "
+                + "return value",
+            Long.class
+        );
     
     private final RedisTemplate<String, String> redisTemplate;
     
@@ -67,7 +80,7 @@ public class RedisQueueRepository {
         long waitingTtlSeconds = java.util.concurrent.TimeUnit.MINUTES.toSeconds(30);
         String userWaitingKey = USER_WAITING_KEY_PREFIX + userId;
         Long result = redisTemplate.execute(
-            new DefaultRedisScript<>(WAITING_QUEUE_ENQUEUE_SCRIPT, Long.class),
+            WAITING_QUEUE_ENQUEUE_SCRIPT,
             List.of(userWaitingKey),
             token.getValue(),
             String.valueOf(waitingTtlSeconds)
@@ -146,6 +159,7 @@ public class RedisQueueRepository {
         List<String> activatedTokens = new ArrayList<>();
         List<String> userIds = new ArrayList<>();
         List<String> tokenKeys = new ArrayList<>();
+        List<String> zombieTokens = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expiredAt = now.plusMinutes(5); // 5분 후 만료
         long ttlSeconds = java.util.concurrent.TimeUnit.MINUTES.toSeconds(5);
@@ -156,13 +170,17 @@ public class RedisQueueRepository {
             String userId = (String) redisTemplate.opsForHash().get(tokenKey, "userId");
             
             if (userId == null) {
-                redisTemplate.opsForZSet().remove(WAITING_KEY, token);
+                zombieTokens.add(token);
                 continue;
             }
             
             activatedTokens.add(token);
             userIds.add(userId);
             tokenKeys.add(tokenKey);
+        }
+        
+        if (!zombieTokens.isEmpty()) {
+            redisTemplate.opsForZSet().remove(WAITING_KEY, zombieTokens.toArray());
         }
 
         if (activatedTokens.isEmpty()) {
@@ -365,11 +383,11 @@ public class RedisQueueRepository {
                 return null;
             });
         
-        Long updatedCount = redisTemplate.opsForValue()
-            .increment(ACTIVE_COUNT_KEY, -expiredTokens.size());
-        if (updatedCount != null && updatedCount < 0) {
-            redisTemplate.opsForValue().set(ACTIVE_COUNT_KEY, "0");
-        }
+        redisTemplate.execute(
+            ACTIVE_COUNT_DECREMENT_SCRIPT,
+            List.of(ACTIVE_COUNT_KEY),
+            String.valueOf(-expiredTokens.size())
+        );
         
         return expiredTokens.size();
     }
@@ -399,10 +417,11 @@ public class RedisQueueRepository {
             });
         
         if (wasActive) {
-            Long updatedCount = redisTemplate.opsForValue().increment(ACTIVE_COUNT_KEY, -1);
-            if (updatedCount != null && updatedCount < 0) {
-                redisTemplate.opsForValue().set(ACTIVE_COUNT_KEY, "0");
-            }
+            redisTemplate.execute(
+                ACTIVE_COUNT_DECREMENT_SCRIPT,
+                List.of(ACTIVE_COUNT_KEY),
+                "-1"
+            );
         }
     }
 }
