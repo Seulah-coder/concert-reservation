@@ -106,7 +106,7 @@ public class RedisQueueRepository {
         });
         
         // 대기 번호 계산 (Pipeline 외부에서 계산)
-        long queueNumber = countWaitingAheadByToken(token.getValue()) + 1;
+        long queueNumber = calculateQueueNumber(token.getValue());
         
         // UserQueue 객체 생성
         return UserQueue.of(
@@ -254,7 +254,7 @@ public class RedisQueueRepository {
         LocalDateTime expiredAt = expiredAtStr != null ? LocalDateTime.parse(expiredAtStr) : null;
         long queueNumber = 0;
         if (status == QueueStatus.WAITING) {
-            queueNumber = countWaitingAheadByToken(token.getValue()) + 1;
+            queueNumber = calculateQueueNumber(token.getValue());
         }
         
         // UserQueue 재구성 (기존 token 사용)
@@ -309,6 +309,10 @@ public class RedisQueueRepository {
         Long rank = redisTemplate.opsForZSet().rank(WAITING_KEY, tokenValue);
         return rank != null ? rank : 0;
     }
+
+    private long calculateQueueNumber(String tokenValue) {
+        return countWaitingAheadByToken(tokenValue) + 1;
+    }
     
     /**
      * 만료된 Active 토큰 제거
@@ -350,10 +354,11 @@ public class RedisQueueRepository {
         List<String> expiredUserIds = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         
-        int index = 0;
-        for (String key : activeKeys) {
-            String expiredAtStr = (String) activeEntries.get(index++);
-            String userId = (String) activeEntries.get(index++);
+        for (int i = 0; i < activeKeys.size(); i++) {
+            String key = activeKeys.get(i);
+            int baseIndex = i * 2;
+            String expiredAtStr = (String) activeEntries.get(baseIndex);
+            String userId = (String) activeEntries.get(baseIndex + 1);
             if (expiredAtStr != null) {
                 LocalDateTime expiredAt = LocalDateTime.parse(expiredAtStr);
                 if (now.isAfter(expiredAt)) {
